@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Workbench</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<script>
+// 配置 marked
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+  headerIds: false,
+  mangle: false
+})
+</script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { 'warm-white':'#F8F9FA','limestone':'#F0F0F0','oxygen-blue':'#7091F5','deep-charcoal':'#2D2D2D' },
+    borderRadius: { 'v4': '2rem' }
+  }}
+}
+</script>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body class="flex h-screen p-5 gap-5">
+
+<!-- ─── Login ─── -->
+<div id="login-screen">
+  <div class="tactile-container p-10 w-80 flex flex-col gap-5">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 bg-deep-charcoal rounded-2xl flex items-center justify-center text-white font-bold italic">W</div>
+      <div>
+        <p class="font-bold">AI Workbench</p>
+        <p class="text-[10px] opacity-40 font-mono">v2026.03</p>
+      </div>
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">用户名</p>
+      <input id="login-user" type="text" value="" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="从 data/.env 的 AUTH_USERNAME 输入">
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">密码</p>
+      <input id="login-pass" type="password" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="••••••••">
+    </div>
+    <p id="login-err" class="text-[11px] text-red-400 font-mono hidden"></p>
+    <button onclick="doLogin()" class="bg-deep-charcoal text-white py-3 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">
+      登录
+    </button>
+  </div>
+</div>
+
+<!-- ─── Terminal Switch Modal ─── -->
+<div id="terminal-switch-modal" class="modal-overlay">
+  <div class="modal-content flex flex-col gap-4">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 bg-amber-500 rounded-2xl flex items-center justify-center text-white">
+        <i data-lucide="terminal" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <p class="font-bold">切换工作区</p>
+        <p class="text-[10px] opacity-40 font-mono">当前工作区有活跃终端</p>
+      </div>
+    </div>
+    <p id="terminal-switch-msg" class="text-sm text-slate-600">当前工作区有 <span id="terminal-switch-count" class="font-bold text-amber-600">0</span> 个活跃终端，切换后如何处理？</p>
+    <div class="flex gap-3 mt-2">
+      <button onclick="cancelTerminalSwitch()" class="flex-1 py-2.5 rounded-2xl text-sm font-bold border border-slate-200 hover:bg-slate-50 transition-colors">取消切换</button>
+      <button onclick="keepTerminalsAndSwitch()" class="flex-1 py-2.5 rounded-2xl text-sm font-bold border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">后台保留</button>
+      <button onclick="closeAllTerminalsAndSwitch()" class="flex-1 bg-deep-charcoal text-white py-2.5 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">关闭全部</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── New Workspace Modal ─── -->
+<div id="new-ws-modal" class="modal-overlay">
+  <div class="modal-content flex flex-col gap-4">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 bg-deep-charcoal rounded-2xl flex items-center justify-center text-white font-bold italic">W</div>
+      <div>
+        <p class="font-bold">新建工作区</p>
+        <p class="text-[10px] opacity-40 font-mono">创建新的工作空间</p>
+      </div>
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">名称 *</p>
+      <input id="new-ws-name" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="例如：开发环境">
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">描述</p>
+      <input id="new-ws-desc" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="可选：工作区用途描述">
+    </div>
+    <p id="new-ws-err" class="text-[11px] text-red-400 font-mono hidden"></p>
+    <div class="flex gap-3 mt-2">
+      <button onclick="closeNewWsModal()" class="flex-1 py-2.5 rounded-2xl text-sm font-bold border border-slate-200 hover:bg-slate-50 transition-colors">取消</button>
+      <button onclick="doCreateWorkspace()" class="flex-1 bg-deep-charcoal text-white py-2.5 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Confirmation Modal (HITL) ─── -->
+<div id="confirmation-modal" class="modal-overlay">
+  <div class="modal-content flex flex-col gap-4 max-w-lg w-full">
+    <div class="flex items-center gap-3 mb-2">
+      <div id="confirm-icon" class="w-10 h-10 bg-red-100 rounded-2xl flex items-center justify-center text-red-600">
+        <i data-lucide="alert-triangle" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <p id="confirm-title" class="font-bold">危险操作确认</p>
+        <p class="text-[10px] opacity-40 font-mono">需要您的授权才能继续</p>
+      </div>
+    </div>
+    <pre id="confirm-description" class="bg-slate-50 rounded-2xl p-4 text-[12px] font-mono whitespace-pre-wrap text-slate-700 max-h-48 overflow-y-auto"></pre>
+    <div class="flex gap-3 mt-2">
+      <button onclick="cancelConfirmation()" class="flex-1 py-2.5 rounded-2xl text-sm font-bold border border-slate-200 hover:bg-slate-50 transition-colors">取消</button>
+      <button id="confirm-execute-btn" onclick="submitConfirmation()" class="flex-1 bg-red-500 text-white py-2.5 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">确认执行</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Mobile Header ─── -->
+<div class="mobile-header hidden">
+  <div class="flex items-center gap-3">
+    <button onclick="toggleMobileSidebar()" class="p-2 rounded-xl hover:bg-slate-100 transition-colors">
+      <i data-lucide="menu" class="w-5 h-5"></i>
+    </button>
+    <div class="w-8 h-8 bg-deep-charcoal rounded-xl flex items-center justify-center text-white font-bold italic">W</div>
+    <span id="mobile-ws-name" class="font-semibold text-sm">—</span>
+  </div>
+  <button onclick="toggleMobileChatSidebar()" class="p-2 rounded-xl hover:bg-slate-100 transition-colors">
+    <i data-lucide="message-square" class="w-5 h-5"></i>
+  </button>
+</div>
+
+<!-- ─── Sidebar nav ─── -->
+<nav class="sidebar-nav w-20 tactile-container flex flex-col items-center py-8 gap-5 shadow-sm shrink-0">
+  <div class="w-11 h-11 bg-deep-charcoal rounded-2xl flex items-center justify-center text-white font-bold italic text-lg shadow-lg mb-2">W</div>
+  <button onclick="sw('intelligence')"  id="nav-intelligence"  title="对话"     class="nav-link active p-3.5 rounded-2xl"><i data-lucide="message-circle" class="w-5 h-5"></i></button>
+  <button onclick="sw('engineering')"   id="nav-engineering"   title="工程化"   class="nav-link p-3.5 rounded-2xl"><i data-lucide="code-2" class="w-5 h-5"></i></button>
+  <button onclick="sw('automation')"    id="nav-automation"    title="定时任务" class="nav-link p-3.5 rounded-2xl"><i data-lucide="calendar-clock" class="w-5 h-5"></i></button>
+  <button onclick="sw('observability')" id="nav-observability" title="仪表盘"   class="nav-link p-3.5 rounded-2xl"><i data-lucide="bar-chart-big" class="w-5 h-5"></i></button>
+  <button onclick="sw('logs')"          id="nav-logs"          title="日志"     class="nav-link p-3.5 rounded-2xl"><i data-lucide="scroll-text" class="w-5 h-5"></i></button>
+  <div class="mt-auto">
+    <button onclick="doLogout()" title="退出登录" class="nav-link p-3.5 rounded-2xl"><i data-lucide="log-out" class="w-5 h-5"></i></button>
+  </div>
+</nav>
+
+<!-- Mobile Sidebar Overlay -->
+<div class="sidebar-overlay" onclick="closeMobileSidebar()"></div>
+
+<!-- Mobile Chat Sidebar Overlay -->
+<div class="chat-sidebar-overlay" onclick="closeMobileChatSidebar()" style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:95;display:none;"></div>
+
+<!-- ─── Main ─── -->
+<div class="flex-1 flex flex-col gap-5 overflow-hidden min-w-0">
+
+  <!-- Header -->
+  <header class="main-header h-[66px] flex items-center justify-between px-6 tactile-container shrink-0 relative z-10">
+    <div class="flex items-center gap-4">
+      <!-- Workspace switcher -->
+      <div id="ws-switcher" class="relative">
+        <div onclick="toggleWsPicker()" class="flex items-center gap-2 bg-white/80 px-4 py-2 rounded-full border border-white shadow-sm cursor-pointer hover:bg-white transition-colors">
+          <div class="w-2 h-2 rounded-full bg-green-500 dot-pulse"></div>
+          <span id="ws-name" class="text-sm font-semibold tracking-tight font-mono">—</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 opacity-40"></i>
+        </div>
+        <div id="ws-picker" class="hidden fixed bg-white/95 backdrop-blur-xl border border-white/80 rounded-2xl shadow-xl overflow-hidden z-[9999] min-w-48">
+          <div id="ws-list" class="py-1.5"></div>
+          <div class="border-t border-slate-100 p-2">
+            <button onclick="showNewWs()" class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-[11px] font-mono opacity-50 hover:opacity-80 transition-opacity">
+              <i data-lucide="plus" class="w-3 h-3"></i>新建工作区
+            </button>
+          </div>
+        </div>
+      </div>
+      <span class="w-px h-4 bg-slate-200 hidden sm:block"></span>
+      <div class="hidden md:flex items-center gap-1.5 text-[10px] font-mono opacity-35">
+        <i data-lucide="lock" class="w-3 h-3"></i>
+        <span id="lock-status">锁: 空闲 · 队列: 0</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-5">
+      <!-- Service pills -->
+      <div class="header-pills flex items-center gap-3 font-mono text-[10px]">
+        <span id="dev-badge" class="hidden flex items-center gap-1.5 text-orange-600 font-bold bg-orange-100 px-2 py-0.5 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-orange-500 inline-block"></span>DEV</span>
+        <span id="pill-runner" class="flex items-center gap-1.5 opacity-45"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>运行器</span>
+        <span id="pill-memory" class="flex items-center gap-1.5 opacity-45"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>记忆</span>
+        <span id="pill-lark"   class="flex items-center gap-1.5 opacity-45"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>飞书</span>
+      </div>
+      <span class="w-px h-4 bg-slate-200 hidden sm:block"></span>
+      <div class="text-right hidden sm:block">
+        <p class="text-[9px] font-bold opacity-25 uppercase tracking-[0.2em]">运行器状态</p>
+        <p id="runner-detail" class="text-[11px] font-mono">—</p>
+      </div>
+      <div id="avatar" class="w-9 h-9 rounded-full bg-slate-200 border-2 border-white shadow-sm flex items-center justify-center text-[10px] font-bold">—</div>
+    </div>
+  </header>
+
+  <!-- ══ VIEW 1: 对话 ══ -->
+  <section id="view-intelligence" class="view-content active flex-1 gap-3 min-h-0">
+
+    <!-- 会话侧边栏 -->
+    <div class="chat-sidebar w-56 tactile-container flex flex-col overflow-hidden shrink-0">
+      <div class="px-5 pt-5 pb-3 shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">会话记录</p>
+          <button onclick="newSession()" class="w-6 h-6 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 flex items-center justify-center transition-colors">
+            <i data-lucide="plus" class="w-3 h-3 text-oxygen-blue"></i>
+          </button>
+        </div>
+        <div onclick="toggleWsPicker()" class="flex items-center gap-2 bg-white/70 px-3 py-2 rounded-2xl border border-white text-[10px] font-mono opacity-60 cursor-pointer hover:opacity-80 transition-opacity">
+          <i data-lucide="folder-open" class="w-3 h-3"></i>
+          <span id="ws-name-sidebar" class="truncate">—</span>
+          <i data-lucide="chevrons-up-down" class="w-3 h-3 ml-auto shrink-0 opacity-40"></i>
+        </div>
+      </div>
+      <div id="session-list" class="flex-1 overflow-y-auto no-scrollbar px-3 pb-4 space-y-1">
+        <p class="text-[10px] font-mono opacity-30 text-center py-4">加载中…</p>
+      </div>
+    </div>
+
+    <!-- 主对话区 -->
+    <div class="flex-1 flex flex-col gap-3 min-h-0 min-w-0">
+
+      <!-- 状态栏 -->
+      <div class="flex items-center justify-between px-1">
+        <div class="flex items-center gap-3">
+          <div id="memory-bar" class="hidden flex items-center gap-2 bg-oxygen-blue/7 border border-oxygen-blue/12 px-4 py-1.5 rounded-full text-[10px] font-bold text-oxygen-blue tracking-[0.07em] uppercase">
+            <i data-lucide="brain-circuit" class="w-3 h-3"></i>
+            <span id="memory-text">记忆加载中…</span>
+          </div>
+          <div class="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-full text-[10px] font-mono text-slate-500">
+            <i data-lucide="layers" class="w-3 h-3"></i>
+            <span id="ctx-turns">上下文: 0 / 20 轮</span>
+          </div>
+        </div>
+        <div class="text-[10px] font-mono opacity-30 flex items-center gap-1.5">
+          <i data-lucide="globe" class="w-3 h-3"></i>渠道: Web
+        </div>
+      </div>
+
+      <!-- 消息区 -->
+      <div id="msg-list" class="flex-1 tactile-container p-7 flex flex-col no-scrollbar overflow-y-auto space-y-5 min-h-0">
+        <!-- 空状态 -->
+        <div id="empty-state" class="flex-1 flex flex-col items-center justify-center opacity-30">
+          <i data-lucide="message-circle" class="w-10 h-10 mb-3"></i>
+          <p class="text-sm font-light">选择工作区，开始对话</p>
+        </div>
+      </div>
+
+      <!-- 排队提示 -->
+      <div id="queue-banner" class="hidden queue-banner rounded-2xl px-5 py-3 flex items-center gap-3">
+        <i data-lucide="hourglass" class="w-4 h-4 text-oxygen-blue opacity-60 shrink-0"></i>
+        <p id="queue-text" class="text-[11px] text-oxygen-blue opacity-70"></p>
+        <button onclick="cancelQueue()" class="ml-auto text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors">取消</button>
+      </div>
+
+      <!-- 输入区 + 指令浮层 -->
+      <div class="relative shrink-0">
+        <!-- 指令浮层 -->
+        <div id="cmd-palette" class="cmd-palette">
+          <div class="px-4 pt-3 pb-1 border-b border-slate-100">
+            <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">可用指令</p>
+          </div>
+          <div id="cmd-list" class="py-1.5"></div>
+        </div>
+        <!-- 文件预览区域 -->
+        <div id="upload-preview" class="hidden mb-2 flex flex-wrap gap-2 px-2"></div>
+        <!-- 飞书会话提示条 -->
+        <div id="lark-notice" class="hidden mb-2 px-4 py-2 bg-blue-50 border border-blue-200 rounded-xl text-[12px] text-blue-600 flex items-center gap-2">
+          <i data-lucide="external-link" class="w-4 h-4"></i>
+          <span>此会话来自飞书，请在飞书中继续对话</span>
+        </div>
+        <!-- 输入框 -->
+        <div id="chat-input-area" class="h-auto min-h-[76px] tactile-container px-7 py-3 flex items-end gap-6 bg-white/40"
+             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+          <input type="file" id="file-input" class="hidden" multiple
+                 accept="image/*,.pdf,.txt,.md,.csv,.json"
+                 onchange="handleFileSelect(event)">
+          <button onclick="$('file-input').click()" class="shrink-0 mb-3 hover:opacity-70 transition-opacity" title="上传文件">
+            <i data-lucide="paperclip" class="w-[18px] h-[18px] opacity-40"></i>
+          </button>
+          <textarea id="chat-input" rows="1"
+            placeholder="向 Claude 下达指令… 输入 / 查看命令&#10;支持拖拽文件到此处&#10;Shift+Enter 换行"
+            class="flex-1 bg-transparent border-none outline-none font-light min-w-0 resize-none py-2"
+            style="min-height: 44px; max-height: 200px; font-size: 15px; padding: 10px 14px 14px; line-height: 1.6;"
+            oninput="onChatInput(this); autoResizeTextarea(this)"
+            onkeydown="onChatKey(event)"></textarea>
+          <div class="flex items-center gap-1 opacity-30 shrink-0 mb-3">
+            <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">⌘</kbd>
+            <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">Enter</kbd>
+          </div>
+          <button onclick="sendMessage()" class="bg-oxygen-blue text-white p-2.5 rounded-2xl shadow-md shadow-oxygen-blue/20 shrink-0 hover:opacity-85 transition-opacity mb-1">
+            <i data-lucide="send" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /主对话区 -->
+
+    <!-- Todo 侧边栏 (闭环执行面板) -->
+    <div class="todo-sidebar w-72 tactile-container flex flex-col overflow-hidden shrink-0 hidden xl:flex">
+      <div class="px-5 pt-5 pb-3 shrink-0 border-b border-slate-100/50">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">自动执行队列</p>
+          <!-- Auto Execute Toggle -->
+          <label class="flex items-center cursor-pointer relative">
+            <input type="checkbox" id="auto-execute-toggle" class="sr-only" onchange="toggleAutoExecute(this)">
+            <div class="toggle-bg w-8 h-4 bg-slate-200 rounded-full transition-colors"></div>
+            <div class="toggle-dot dot absolute left-1 top-1 bg-white w-2 h-2 rounded-full transition-transform"></div>
+          </label>
+        </div>
+        <div class="text-[10px] font-mono opacity-50 flex items-center gap-1.5">
+          <span id="auto-execute-status-text">未开启自动执行</span>
+        </div>
+      </div>
+      <div id="todo-list-container" class="flex-1 overflow-y-auto no-scrollbar p-0 space-y-0">
+        <p class="text-[10px] font-mono opacity-30 text-center py-4">加载中…</p>
+      </div>
+    </div><!-- /Todo 侧边栏 -->
+  </section>
+
+  <!-- ══ VIEW 2: 工程化（文件编辑器 + 终端）══ -->
+  <section id="view-engineering" class="view-content flex-1 flex min-h-0 engineering-layout">
+    <!-- 文件树侧边栏 -->
+    <div class="file-tree tactile-container flex flex-col overflow-hidden">
+      <!-- 文件树工具栏 -->
+      <div class="px-3 py-2 border-b border-slate-100/50">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">文件</p>
+          <div class="flex items-center gap-1">
+            <button onclick="showNewFileInput('.')" class="p-1.5 rounded-lg hover:bg-white/50 transition-colors" title="新建文件">
+              <i data-lucide="file-plus" class="w-3.5 h-3.5 opacity-50"></i>
+            </button>
+            <button onclick="showNewFolderInput('.')" class="p-1.5 rounded-lg hover:bg-white/50 transition-colors" title="新建目录">
+              <i data-lucide="folder-plus" class="w-3.5 h-3.5 opacity-50"></i>
+            </button>
+            <button onclick="refreshFileTree()" class="p-1.5 rounded-lg hover:bg-white/50 transition-colors" title="刷新">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5 opacity-50"></i>
+            </button>
+          </div>
+        </div>
+        <!-- 新建文件/目录输入框 -->
+        <div id="new-file-input-container" class="hidden">
+          <div class="flex items-center gap-2">
+            <input type="text" id="new-file-input" placeholder="文件名..."
+              class="flex-1 px-2 py-1 text-[11px] bg-white/70 rounded border border-slate-200 outline-none focus:border-oxygen-blue/40"
+              onkeydown="handleNewFileKey(event)"
+              onblur="hideNewFileInput()">
+          </div>
+        </div>
+        <div id="new-folder-input-container" class="hidden">
+          <div class="flex items-center gap-2">
+            <input type="text" id="new-folder-input" placeholder="目录名..."
+              class="flex-1 px-2 py-1 text-[11px] bg-white/70 rounded border border-slate-200 outline-none focus:border-oxygen-blue/40"
+              onkeydown="handleNewFolderKey(event)"
+              onblur="hideNewFolderInput()">
+          </div>
+        </div>
+      </div>
+      <div id="file-tree" class="flex-1 overflow-y-auto no-scrollbar p-2">
+        <p class="text-[10px] font-mono opacity-30 text-center py-4">选择工作区加载文件</p>
+      </div>
+    </div>
+
+    <!-- 编辑器和终端区域 -->
+    <div id="editor-terminal-container" class="editor-terminal-panel">
+      <!-- 编辑器区域 -->
+      <div id="editor-panel" class="editor-panel relative">
+        <!-- 编辑器工具栏 -->
+        <div id="editor-toolbar" class="editor-toolbar hidden">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <i data-lucide="file-code" class="w-4 h-4 opacity-40"></i>
+            <span id="editor-filename" class="text-[12px] font-medium truncate">未命名</span>
+            <span id="unsaved-indicator" class="w-2 h-2 rounded-full bg-amber-500 hidden" title="有未保存的更改"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="save-status" class="text-[10px] font-mono opacity-0 transition-opacity"></span>
+            <button id="save-btn" onclick="saveCurrentFile()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 text-oxygen-blue text-[11px] font-bold transition-colors">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i>
+              <span>保存</span>
+              <span class="opacity-50 text-[9px]">⌘S</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 编辑器容器 -->
+        <div id="editor-container" class="editor-container relative">
+          <div id="editor-empty" class="absolute inset-0 flex flex-col items-center justify-center opacity-30">
+            <i data-lucide="file-code" class="w-12 h-12 mb-3"></i>
+            <p class="text-sm">点击左侧文件开始编辑</p>
+            <p class="text-[10px] font-mono mt-1 opacity-50">Ctrl+S 保存</p>
+          </div>
+          <div id="monaco-editor" class="absolute inset-0 hidden"></div>
+        </div>
+      </div>
+
+      <!-- 拖拽分割线 -->
+      <div id="editor-terminal-divider"></div>
+
+      <!-- 终端面板 -->
+      <div id="terminal-panel" class="terminal-panel">
+        <!-- 终端 Tab 栏 -->
+        <div class="terminal-tab-bar">
+          <div id="terminal-tabs" class="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar">
+            <!-- Terminal tabs will be rendered here -->
+          </div>
+          <button id="new-terminal-btn" onclick="createNewTerminal()" class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 text-oxygen-blue text-[10px] font-bold transition-colors shrink-0 h-7">
+            <i data-lucide="plus" class="w-3 h-3"></i>
+            <span>新建</span>
+          </button>
+        </div>
+
+        <!-- 终端容器 -->
+        <div class="terminal-container-wrapper relative">
+          <div id="terminal-container" class="terminal-container w-full h-full relative">
+            <!-- Terminals will be mounted here -->
+            <div id="terminal-empty" class="absolute inset-0 flex flex-col items-center justify-center text-white/30">
+              <i data-lucide="terminal" class="w-10 h-10 mb-2"></i>
+              <p class="text-xs">点击"新建终端"开始</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 终端状态栏 -->
+        <div class="terminal-status-bar">
+          <div class="flex items-center gap-3">
+            <span id="terminal-cwd" class="truncate max-w-[200px]">—</span>
+            <span id="terminal-status" class="flex items-center gap-1.5 text-[10px]">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+              未连接
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button id="clear-terminal-btn" onclick="clearCurrentTerminal()" class="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-[10px] transition-colors" title="清屏">
+              <i data-lucide="trash-2" class="w-3 h-3"></i>
+            </button>
+            <span id="terminal-count" class="text-[10px]">0 / 5</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- ══ VIEW 3: 定时任务 ══ -->
+  <section id="view-automation" class="view-content flex-1 min-h-0 gap-5">
+    <div class="w-80 tactile-container flex flex-col overflow-hidden shrink-0">
+      <div class="px-5 py-4 border-b border-slate-100/50">
+        <div class="flex items-center justify-between">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">任务列表</p>
+          <button onclick="openTaskModal()" class="w-7 h-7 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 flex items-center justify-center transition-colors">
+            <i data-lucide="plus" class="w-4 h-4 text-oxygen-blue"></i>
+          </button>
+        </div>
+      </div>
+      <div id="task-list" class="flex-1 overflow-y-auto no-scrollbar p-3">
+        <!-- 任务列表将在这里渲染 -->
+        <div class="text-center opacity-30 py-8">
+          <i data-lucide="calendar-clock" class="w-10 h-10 mx-auto mb-3"></i>
+          <p class="text-[11px] font-mono">加载中...</p>
+        </div>
+      </div>
+    </div>
+    <div id="task-detail-panel" class="flex-1 tactile-container flex flex-col overflow-hidden">
+      <div id="task-detail-empty" class="flex-1 flex items-center justify-center">
+        <div class="text-center opacity-30">
+          <i data-lucide="clock" class="w-12 h-12 mx-auto mb-3"></i>
+          <p class="font-semibold">定时任务</p>
+          <p class="text-sm mt-1">选择任务查看详情</p>
+          <p class="text-[11px] font-mono opacity-60 mt-2">支持 cron/interval/once 三种模式</p>
+        </div>
+      </div>
+      <div id="task-detail-content" class="hidden flex-col h-full">
+        <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100/50">
+          <div>
+            <p id="detail-name" class="font-semibold">任务名称</p>
+            <p id="detail-schedule" class="text-[10px] font-mono opacity-40 mt-0.5">schedule</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="detail-status" class="px-2 py-1 rounded-lg text-[10px] font-bold bg-green-100 text-green-700">active</span>
+            <button onclick="triggerCurrentTask()" class="p-2 rounded-lg hover:bg-slate-100 transition-colors" title="立即执行">
+              <i data-lucide="play" class="w-4 h-4"></i>
+            </button>
+            <button id="btn-pause-resume" onclick="togglePauseCurrentTask()" class="p-2 rounded-lg hover:bg-slate-100 transition-colors" title="暂停/恢复">
+              <i data-lucide="pause" class="w-4 h-4"></i>
+            </button>
+            <button onclick="editCurrentTask()" class="p-2 rounded-lg hover:bg-slate-100 transition-colors" title="编辑">
+              <i data-lucide="edit-2" class="w-4 h-4"></i>
+            </button>
+            <button onclick="deleteCurrentTask()" class="p-2 rounded-lg hover:bg-red-50 text-red-500 transition-colors" title="删除">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
+          </div>
+        </div>
+        <div class="flex-1 overflow-y-auto p-6">
+          <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="bg-slate-50 rounded-2xl p-4">
+              <p class="text-[10px] font-mono opacity-40 mb-1">命令类型</p>
+              <p id="detail-command-type" class="text-sm font-medium">shell</p>
+            </div>
+            <div class="bg-slate-50 rounded-2xl p-4">
+              <p class="text-[10px] font-mono opacity-40 mb-1">执行次数</p>
+              <p id="detail-run-count" class="text-sm font-medium">0</p>
+            </div>
+            <div class="bg-slate-50 rounded-2xl p-4">
+              <p class="text-[10px] font-mono opacity-40 mb-1">上次执行</p>
+              <p id="detail-last-run" class="text-sm font-medium">-</p>
+            </div>
+            <div class="bg-slate-50 rounded-2xl p-4">
+              <p class="text-[10px] font-mono opacity-40 mb-1">下次执行</p>
+              <p id="detail-next-run" class="text-sm font-medium">-</p>
+            </div>
+          </div>
+          <div class="mb-6">
+            <p class="text-[10px] font-mono opacity-40 mb-2">命令内容</p>
+            <pre id="detail-command" class="bg-slate-900 text-slate-100 p-4 rounded-2xl text-xs font-mono overflow-x-auto"></pre>
+          </div>
+          <div>
+            <p class="text-[10px] font-mono opacity-40 mb-2">执行历史（最近10条）</p>
+            <div id="task-runs-list" class="space-y-2">
+              <!-- 执行记录将在这里渲染 -->
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ Task Modal ══ -->
+  <div id="task-modal" class="modal-overlay">
+    <div class="modal-content flex flex-col gap-4 max-w-lg w-full">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 bg-oxygen-blue/10 rounded-2xl flex items-center justify-center">
+          <i data-lucide="calendar-clock" class="w-5 h-5 text-oxygen-blue"></i>
+        </div>
+        <div>
+          <p id="task-modal-title" class="font-bold">新建定时任务</p>
+          <p class="text-[10px] opacity-40 font-mono">配置自动化任务</p>
+        </div>
+      </div>
+      <input type="hidden" id="task-id">
+      <div>
+        <p class="text-[10px] font-mono opacity-40 mb-1.5">工作区 *</p>
+        <select id="task-workspace" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm outline-none focus:border-oxygen-blue/40 transition-colors">
+          <!-- 动态填充 -->
+        </select>
+      </div>
+      <div>
+        <p class="text-[10px] font-mono opacity-40 mb-1.5">任务名称 *</p>
+        <input id="task-name" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="例如：每日数据备份">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <p class="text-[10px] font-mono opacity-40 mb-1.5">调度类型 *</p>
+          <select id="task-type" onchange="onTaskTypeChange()" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm outline-none focus:border-oxygen-blue/40 transition-colors">
+            <option value="cron">Cron 表达式</option>
+            <option value="interval">固定间隔</option>
+            <option value="once">一次性</option>
+          </select>
+        </div>
+        <div>
+          <p class="text-[10px] font-mono opacity-40 mb-1.5">命令类型 *</p>
+          <select id="task-command-type" onchange="onTaskCommandTypeChange()" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm outline-none focus:border-oxygen-blue/40 transition-colors">
+            <option value="shell">Shell 命令</option>
+            <option value="assistant">AI 对话</option>
+            <option value="http">HTTP 请求</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <p class="text-[10px] font-mono opacity-40 mb-1.5">
+          <span id="task-schedule-label">Cron 表达式 *</span>
+          <span id="task-schedule-hint" class="text-oxygen-blue ml-2"></span>
+        </p>
+        <input id="task-schedule" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="0 2 * * *">
+        <p id="cron-preview" class="text-[10px] text-slate-500 mt-1.5 hidden"></p>
+      </div>
+      <div>
+        <p class="text-[10px] font-mono opacity-40 mb-1.5">命令内容 *</p>
+        <textarea id="task-command" rows="3" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors resize-none" placeholder="输入命令..."></textarea>
+      </div>
+      <div id="task-alert-on-error-container" class="flex items-center gap-2">
+        <input type="checkbox" id="task-alert-on-error" class="w-4 h-4 rounded border-slate-300 text-oxygen-blue focus:ring-oxygen-blue">
+        <label for="task-alert-on-error" class="text-xs text-slate-600">Shell 执行失败时发送告警（AI 分析并尝试自动修复）</label>
+      </div>
+      <div>
+        <p class="text-[10px] font-mono opacity-40 mb-1.5">完成后通知</p>
+        <select id="task-notify" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm outline-none focus:border-oxygen-blue/40 transition-colors">
+          <option value="">不通知</option>
+          <option value="web">Web 仪表盘</option>
+          <option value="lark">飞书</option>
+        </select>
+      </div>
+      <div id="task-notify-lark-config" class="hidden">
+        <p class="text-[10px] font-mono opacity-40 mb-1.5">飞书 Chat ID</p>
+        <input id="task-notify-chat-id" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="oc_xxx...">
+      </div>
+      <p id="task-modal-error" class="text-[11px] text-red-400 font-mono hidden"></p>
+      <div class="flex gap-3 mt-2">
+        <button onclick="closeTaskModal()" class="flex-1 py-2.5 rounded-2xl text-sm font-bold border border-slate-200 hover:bg-slate-50 transition-colors">取消</button>
+        <button onclick="saveTask()" class="flex-1 bg-deep-charcoal text-white py-2.5 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══ VIEW 4: 仪表盘 ══ -->
+  <section id="view-observability" class="view-content flex-1 min-h-0 gap-5 flex-wrap content-start overflow-y-auto">
+    <!-- Token 统计卡片 -->
+    <div class="w-full xl:w-[calc(66%-10px)] h-64 tactile-container p-6 flex flex-col">
+      <div class="flex items-center justify-between mb-4">
+        <p class="font-semibold">Token 消耗</p>
+        <div class="flex items-center gap-2 text-[10px] font-mono opacity-40">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-oxygen-blue"></span>Input</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span>Output</span>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center opacity-30">
+        <div class="text-center">
+          <i data-lucide="bar-chart-2" class="w-10 h-10 mx-auto mb-2"></i>
+          <p class="text-[11px] font-mono">图表区域</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系统状态卡片 -->
+    <div class="w-full xl:w-[calc(34%-10px)] h-64 tactile-container p-6 flex flex-col">
+      <p class="font-semibold mb-4">系统状态</p>
+      <div class="flex-1 space-y-3">
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+              <i data-lucide="cpu" class="w-4 h-4 text-green-600"></i>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">运行器</p>
+              <p class="text-[9px] font-mono opacity-40">Agent Runner</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-green-600 bg-green-100 px-2 py-1 rounded-full">正常</span>
+        </div>
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+              <i data-lucide="brain" class="w-4 h-4 text-blue-600"></i>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">记忆服务</p>
+              <p class="text-[9px] font-mono opacity-40">Memory Service</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-blue-600 bg-blue-100 px-2 py-1 rounded-full">正常</span>
+        </div>
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+              <i data-lucide="message-circle" class="w-4 h-4 text-purple-600"></i>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">飞书连接</p>
+              <p class="text-[9px] font-mono opacity-40">Lark Bot</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-1 rounded-full">未配置</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工作区统计 -->
+    <div class="w-full md:w-[calc(50%-10px)] h-48 tactile-container p-6 flex flex-col">
+      <p class="font-semibold mb-4">工作区分布</p>
+      <div class="flex-1 flex items-center justify-center opacity-30">
+        <p class="text-[11px] font-mono">饼图区域</p>
+      </div>
+    </div>
+
+    <!-- 今日概览 -->
+    <div class="w-full md:w-[calc(50%-10px)] h-48 tactile-container p-6 flex flex-col">
+      <p class="font-semibold mb-4">今日概览</p>
+      <div class="flex-1 grid grid-cols-3 gap-4">
+        <div class="text-center p-3 rounded-xl bg-white/50">
+          <p class="text-2xl font-bold text-oxygen-blue">0</p>
+          <p class="text-[9px] font-mono opacity-40 mt-1">对话次数</p>
+        </div>
+        <div class="text-center p-3 rounded-xl bg-white/50">
+          <p class="text-2xl font-bold text-green-500">0</p>
+          <p class="text-[9px] font-mono opacity-40 mt-1">Token 消耗</p>
+        </div>
+        <div class="text-center p-3 rounded-xl bg-white/50">
+          <p class="text-2xl font-bold text-purple-500">0</p>
+          <p class="text-[9px] font-mono opacity-40 mt-1">终端会话</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ VIEW 5: 日志 ══ -->
+  <section id="view-logs" class="view-content flex-1 min-h-0 gap-5">
+    <div class="w-56 tactile-container flex flex-col overflow-hidden shrink-0">
+      <div class="px-5 py-5 border-b border-slate-100/50">
+        <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">日志分类</p>
+      </div>
+      <div class="flex-1 overflow-y-auto no-scrollbar p-2 space-y-1">
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-oxygen-blue/10 text-oxygen-blue text-[11px] font-medium">
+          <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+          全部日志
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="server" class="w-3.5 h-3.5"></i>
+          系统日志
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="bot" class="w-3.5 h-3.5"></i>
+          SDK 调用
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="calendar" class="w-3.5 h-3.5"></i>
+          任务执行
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
+          终端记录
+        </button>
+      </div>
+    </div>
+    <div class="flex-1 tactile-container flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100/50">
+        <div class="flex items-center gap-4">
+          <p class="font-semibold">实时日志</p>
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/70 border border-white">
+            <i data-lucide="search" class="w-3 h-3 opacity-40"></i>
+            <input type="text" placeholder="搜索日志..." class="bg-transparent border-none outline-none text-[11px] w-48">
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="p-2 rounded-lg hover:bg-white/50 transition-colors" title="导出">
+            <i data-lucide="download" class="w-4 h-4 opacity-50"></i>
+          </button>
+          <button class="p-2 rounded-lg hover:bg-white/50 transition-colors" title="清空">
+            <i data-lucide="trash-2" class="w-4 h-4 opacity-50"></i>
+          </button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto no-scrollbar p-4 font-mono text-[11px] space-y-2">
+        <div class="text-center opacity-30 py-8">
+          <i data-lucide="scroll-text" class="w-10 h-10 mx-auto mb-3"></i>
+          <p class="text-[11px]">日志服务</p>
+          <p class="text-sm mt-1">阶段六实现中</p>
+          <p class="text-[10px] mt-2 opacity-60">支持实时推送、关键词搜索、分类筛选</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div><!-- /main -->
+
+<script src="js/state.js"></script>
+<script src="js/api.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/app.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/terminal.js"></script>
+<script src="js/editor.js"></script>
+<script src="js/filetree.js"></script>
+<script src="js/tasks.js"></script>
+<script src="js/todos.js"></script>
+<script src="js/dashboard.js"></script>
+<script>
+// 启动应用
+lucide.createIcons()
+init()
+</script>
+</body>
+</html>

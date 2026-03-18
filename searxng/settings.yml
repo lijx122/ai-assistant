@@ -1,0 +1,24 @@
+# 使用默认配置作为基础
+use_default_settings: true
+
+# 自定义设置
+server:
+  # 关闭限流，允许更多请求
+  limiter: false
+  # 你的密钥
+  secret_key: "changethissecretkey123"
+  # 如果你愿意，也可以标记为公共实例
+  # public_instance: true
+
+search:
+  # 关键步骤：显式允许 JSON 格式
+  formats:
+    - html
+    - json
+
+# 可以根据需要启用更多搜索引擎，但这不是解决403的必要条件
+# engines:
+#   - name: google
+#     disabled: false
+#   - name: bing
+#     disabled: false

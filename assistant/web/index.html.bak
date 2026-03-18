@@ -1,0 +1,3984 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Workbench</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css" />
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
+<script>
+// 配置 marked
+marked.setOptions({
+  breaks: true,
+  gfm: true,
+  headerIds: false,
+  mangle: false
+})
+</script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    colors: { 'warm-white':'#F8F9FA','limestone':'#F0F0F0','oxygen-blue':'#7091F5','deep-charcoal':'#2D2D2D' },
+    borderRadius: { 'v4': '2rem' }
+  }}
+}
+</script>
+<style>
+* { box-sizing: border-box; }
+body { font-family:'Plus Jakarta Sans',sans-serif; background:#F8F9FA; color:#2D2D2D; overflow:hidden; -webkit-font-smoothing:antialiased; }
+
+/* Responsive Layout */
+@media (max-width: 768px) {
+  body { padding: 0.5rem; }
+  .sidebar-nav {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 90;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    border-radius: 0;
+    width: 64px;
+    padding: 1rem 0.5rem;
+  }
+  .sidebar-nav.open { transform: translateX(0); }
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 80;
+    display: none;
+  }
+  .sidebar-overlay.open { display: block; }
+  .mobile-header {
+    display: flex !important;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.75rem 1rem;
+    margin: -0.5rem -0.5rem 0.5rem -0.5rem;
+    background: rgba(255,255,255,0.8);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(0,0,0,0.06);
+  }
+  .main-header { padding: 0.75rem 1rem !important; }
+  .header-pills { display: none !important; }
+  .view-content { border-radius: 1rem !important; }
+  /* 移动端隐藏会话侧边栏，改为可滑出 */
+  .chat-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    width: 280px;
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    border-radius: 0;
+  }
+  .chat-sidebar.open { transform: translateX(0); }
+}
+
+.tactile-container {
+  background:rgba(255,255,255,0.6); backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.8);
+  box-shadow:inset 0 1px 1px rgba(255,255,255,0.9), 0 20px 40px -10px rgba(0,0,0,0.03);
+  border-radius:2.5rem;
+}
+.nav-link { transition:all 0.3s; color:#94A3B8; }
+.nav-link.active { color:#7091F5; background:white; box-shadow:0 10px 20px -5px rgba(112,145,245,0.2); }
+.tool-body { display:none; }
+.tool-body.open { display:block; }
+.tool-chevron { transition:transform 0.2s; }
+.tool-chevron.open { transform:rotate(180deg); }
+.stream-cursor { display:inline-block; width:2px; height:14px; background:#7091F5; margin-left:2px; vertical-align:middle; animation:blink 0.9s infinite; }
+@keyframes blink { 50%{opacity:0} }
+.dot-pulse { animation:dp 2s infinite; }
+@keyframes dp { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,0.4)} 50%{box-shadow:0 0 0 5px rgba(34,197,94,0)} }
+.queue-banner { background:linear-gradient(135deg,rgba(112,145,245,0.07),rgba(112,145,245,0.02)); border:1px solid rgba(112,145,245,0.14); }
+.no-scrollbar::-webkit-scrollbar { display:none; }
+.session-item { transition:all 0.15s; cursor:pointer; }
+.session-item:hover { background:rgba(255,255,255,0.7); }
+.session-item.active { background:white; box-shadow:0 4px 12px -2px rgba(0,0,0,0.06); }
+.cmd-palette {
+  position:absolute; bottom:calc(100% + 8px); left:0; right:0;
+  background:rgba(255,255,255,0.97); backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.9);
+  box-shadow:0 -20px 40px -10px rgba(0,0,0,0.08);
+  border-radius:1.5rem; overflow:hidden; display:none; z-index:50;
+}
+.cmd-palette.open { display:block; }
+.cmd-item { transition:background 0.1s; cursor:pointer; }
+.cmd-item:hover,.cmd-item.selected { background:rgba(112,145,245,0.07); }
+.msg-user .bubble { background:#2D2D2D; color:white; border-radius:2rem 2rem 0 2rem; }
+.msg-assistant .bubble { background:rgba(255,255,255,0.85); border:1px solid white; border-radius:2rem 2rem 2rem 0; box-shadow:0 4px 12px -2px rgba(0,0,0,0.05); }
+.msg-assistant .bubble code { background:rgba(112,145,245,0.08); color:#7091F5; padding:0.1em 0.35em; border-radius:0.35em; font-size:0.85em; }
+pre code { background:transparent !important; color:inherit !important; padding:0 !important; }
+.tool-block { border-radius:1.25rem; overflow:hidden; }
+
+/* Login overlay */
+#login-screen { position:fixed; inset:0; background:#F8F9FA; display:flex; align-items:center; justify-content:center; z-index:100; }
+#login-screen.hidden { display:none; }
+
+/* Page views */
+.view-content:not(.active) { display:none !important; opacity: 0; }
+.view-content.active { display:flex !important; opacity: 1; animation: fadeIn 0.3s ease; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+.tog { appearance:none; width:38px; height:21px; background:#e2e8f0; border-radius:999px; cursor:pointer; position:relative; transition:background 0.2s; }
+.tog:checked { background:#7091F5; }
+.tog::after { content:''; position:absolute; width:15px; height:15px; background:white; border-radius:50%; top:3px; left:3px; transition:transform 0.2s; box-shadow:0 1px 3px rgba(0,0,0,0.2); }
+.tog:checked::after { transform:translateX(17px); }
+
+/* Dropdown Menu Styles */
+.menu-btn { opacity:0; transition:opacity 0.15s; }
+.session-item:hover .menu-btn, .ws-item:hover .menu-btn { opacity:1; }
+.dropdown-menu {
+  position:absolute; right:0; top:100%;
+  background:rgba(255,255,255,0.98); backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.9);
+  box-shadow:0 10px 40px -10px rgba(0,0,0,0.15);
+  border-radius:1rem; overflow:hidden;
+  min-width:120px; z-index:100; display:none;
+}
+.dropdown-menu.open { display:block; }
+.dropdown-item {
+  padding:0.6rem 1rem; font-size:12px;
+  cursor:pointer; transition:background 0.1s;
+  display:flex; align-items:center; gap:0.5rem;
+}
+.dropdown-item:hover { background:rgba(112,145,245,0.08); }
+.dropdown-item.delete { color:#ef4444; }
+.dropdown-item.delete:hover { background:rgba(239,68,68,0.08); }
+
+/* Terminal Styles */
+.terminal-tab { transition:all 0.15s; cursor:pointer; position:relative; }
+.terminal-tab:hover { background:rgba(255,255,255,0.5); }
+.terminal-tab.active { background:white; box-shadow:0 4px 12px -2px rgba(0,0,0,0.06); }
+.terminal-tab .close-btn { opacity:0; transition:opacity 0.15s; }
+
+/* Chat input scrollbar */
+#chat-input::-webkit-scrollbar {
+  width: 4px;
+}
+#chat-input::-webkit-scrollbar-thumb {
+  background: rgba(0,0,0,0.2);
+  border-radius: 2px;
+}
+#chat-input::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-tab:hover .close-btn { opacity:1; }
+.terminal-container { background:#1a1a1a; border-radius:1rem; overflow:hidden; }
+.terminal-container .xterm { padding:0.75rem; }
+.terminal-disconnected { position:absolute; inset:0; background:rgba(0,0,0,0.7); display:flex; align-items:center; justify-content:center; z-index:10; }
+
+/* Modal Styles */
+.modal-overlay {
+  position:fixed; inset:0; background:rgba(0,0,0,0.3);
+  backdrop-filter:blur(4px);
+  display:none; align-items:center; justify-content:center;
+  z-index:200;
+}
+.modal-overlay.open { display:flex; }
+.modal-content {
+  background:rgba(255,255,255,0.95); backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,0.9);
+  box-shadow:0 20px 60px -20px rgba(0,0,0,0.2);
+  border-radius:2rem; padding:2rem; width:360px;
+}
+
+/* Engineering Layout */
+.engineering-layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+  gap: 12px;
+}
+
+.file-tree {
+  width: 220px;
+  min-width: 180px;
+  border-right: 1px solid rgba(0,0,0,0.06);
+  overflow-y: auto;
+  flex-shrink: 0;
+  border-radius: 1.5rem;
+}
+
+/* 拖拽相关样式 */
+.tree-node-wrapper.drag-over {
+  background: rgba(112,145,245,0.15);
+  border-radius: 0.5rem;
+}
+
+.tree-node-wrapper.drag-over > .tree-node {
+  background: rgba(112,145,245,0.1);
+}
+
+.tree-node[draggable="true"] {
+  cursor: grab;
+}
+
+.tree-node[draggable="true"]:active {
+  cursor: grabbing;
+}
+
+.editor-terminal-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  gap: 12px;
+}
+
+.editor-panel {
+  flex: 0 0 auto;          /* flex-grow:0, flex-shrink:0, flex-basis 由 JS 设置 */
+  overflow: hidden;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1.5rem;
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.8);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 20px 40px -10px rgba(0,0,0,0.03);
+}
+
+.editor-toolbar {
+  height: 44px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.4);
+}
+
+.editor-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+.terminal-panel {
+  flex: 0 0 auto;           /* flex-grow:0, flex-shrink:0, flex-basis 由 JS 设置 */
+  overflow: hidden;
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1.5rem;
+  background: rgba(255,255,255,0.6);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255,255,255,0.8);
+  box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 20px 40px -10px rgba(0,0,0,0.03);
+}
+
+.terminal-tab-bar {
+  height: 36px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.4);
+}
+
+.terminal-container-wrapper {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  background: #1a1a1a;
+  margin: 8px;
+  border-radius: 12px;
+}
+
+.terminal-status-bar {
+  height: 28px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  background: rgba(255,255,255,0.4);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* Editor tab styles */
+.editor-tab {
+  transition: all 0.15s;
+  cursor: pointer;
+  position: relative;
+}
+.editor-tab:hover { background: rgba(255,255,255,0.5); }
+.editor-tab.active { background: white; box-shadow: 0 4px 12px -2px rgba(0,0,0,0.06); }
+.editor-tab .close-btn { opacity: 0; transition: opacity 0.15s; }
+.editor-tab:hover .close-btn { opacity: 1; }
+
+/* Editor-Terminal Resizable Divider */
+#editor-terminal-divider {
+  height: 6px;
+  background: rgba(0,0,0,0.06);
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+  position: relative;
+}
+#editor-terminal-divider::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 3px;
+  background: rgba(0,0,0,0.1);
+  border-radius: 2px;
+}
+#editor-terminal-divider:hover {
+  background: rgba(112,145,245,0.3);
+}
+#editor-terminal-divider:hover::before {
+  background: rgba(112,145,245,0.8);
+}
+#editor-terminal-divider.dragging {
+  background: rgba(112,145,245,0.5);
+}
+</style>
+</head>
+<body class="flex h-screen p-5 gap-5">
+
+<!-- ─── Login ─── -->
+<div id="login-screen">
+  <div class="tactile-container p-10 w-80 flex flex-col gap-5">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 bg-deep-charcoal rounded-2xl flex items-center justify-center text-white font-bold italic">W</div>
+      <div>
+        <p class="font-bold">AI Workbench</p>
+        <p class="text-[10px] opacity-40 font-mono">v2026.03</p>
+      </div>
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">用户名</p>
+      <input id="login-user" type="text" value="admin" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors">
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">密码</p>
+      <input id="login-pass" type="password" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="••••••••">
+    </div>
+    <p id="login-err" class="text-[11px] text-red-400 font-mono hidden"></p>
+    <button onclick="doLogin()" class="bg-deep-charcoal text-white py-3 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">
+      登录
+    </button>
+  </div>
+</div>
+
+<!-- ─── New Workspace Modal ─── -->
+<div id="new-ws-modal" class="modal-overlay">
+  <div class="modal-content flex flex-col gap-4">
+    <div class="flex items-center gap-3 mb-2">
+      <div class="w-10 h-10 bg-deep-charcoal rounded-2xl flex items-center justify-center text-white font-bold italic">W</div>
+      <div>
+        <p class="font-bold">新建工作区</p>
+        <p class="text-[10px] opacity-40 font-mono">创建新的工作空间</p>
+      </div>
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">名称 *</p>
+      <input id="new-ws-name" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="例如：开发环境">
+    </div>
+    <div>
+      <p class="text-[10px] font-mono opacity-40 mb-1.5">描述</p>
+      <input id="new-ws-desc" type="text" class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100 text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors" placeholder="可选：工作区用途描述">
+    </div>
+    <p id="new-ws-err" class="text-[11px] text-red-400 font-mono hidden"></p>
+    <div class="flex gap-3 mt-2">
+      <button onclick="closeNewWsModal()" class="flex-1 py-2.5 rounded-2xl text-sm font-bold border border-slate-200 hover:bg-slate-50 transition-colors">取消</button>
+      <button onclick="doCreateWorkspace()" class="flex-1 bg-deep-charcoal text-white py-2.5 rounded-2xl text-sm font-bold hover:opacity-80 transition-opacity">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Mobile Header ─── -->
+<div class="mobile-header hidden">
+  <div class="flex items-center gap-3">
+    <button onclick="toggleMobileSidebar()" class="p-2 rounded-xl hover:bg-slate-100 transition-colors">
+      <i data-lucide="menu" class="w-5 h-5"></i>
+    </button>
+    <div class="w-8 h-8 bg-deep-charcoal rounded-xl flex items-center justify-center text-white font-bold italic">W</div>
+    <span id="mobile-ws-name" class="font-semibold text-sm">—</span>
+  </div>
+  <button onclick="toggleMobileChatSidebar()" class="p-2 rounded-xl hover:bg-slate-100 transition-colors">
+    <i data-lucide="message-square" class="w-5 h-5"></i>
+  </button>
+</div>
+
+<!-- ─── Sidebar nav ─── -->
+<nav class="sidebar-nav w-20 tactile-container flex flex-col items-center py-8 gap-5 shadow-sm shrink-0">
+  <div class="w-11 h-11 bg-deep-charcoal rounded-2xl flex items-center justify-center text-white font-bold italic text-lg shadow-lg mb-2">W</div>
+  <button onclick="sw('intelligence')"  id="nav-intelligence"  title="对话"     class="nav-link active p-3.5 rounded-2xl"><i data-lucide="message-circle" class="w-5 h-5"></i></button>
+  <button onclick="sw('engineering')"   id="nav-engineering"   title="工程化"   class="nav-link p-3.5 rounded-2xl"><i data-lucide="code-2" class="w-5 h-5"></i></button>
+  <button onclick="sw('automation')"    id="nav-automation"    title="定时任务" class="nav-link p-3.5 rounded-2xl"><i data-lucide="calendar-clock" class="w-5 h-5"></i></button>
+  <button onclick="sw('observability')" id="nav-observability" title="仪表盘"   class="nav-link p-3.5 rounded-2xl"><i data-lucide="bar-chart-big" class="w-5 h-5"></i></button>
+  <button onclick="sw('logs')"          id="nav-logs"          title="日志"     class="nav-link p-3.5 rounded-2xl"><i data-lucide="scroll-text" class="w-5 h-5"></i></button>
+  <div class="mt-auto">
+    <button onclick="doLogout()" title="退出登录" class="nav-link p-3.5 rounded-2xl"><i data-lucide="log-out" class="w-5 h-5"></i></button>
+  </div>
+</nav>
+
+<!-- Mobile Sidebar Overlay -->
+<div class="sidebar-overlay" onclick="closeMobileSidebar()"></div>
+
+<!-- Mobile Chat Sidebar Overlay -->
+<div class="chat-sidebar-overlay" onclick="closeMobileChatSidebar()" style="position:fixed;inset:0;background:rgba(0,0,0,0.3);z-index:95;display:none;"></div>
+
+<!-- ─── Main ─── -->
+<div class="flex-1 flex flex-col gap-5 overflow-hidden min-w-0">
+
+  <!-- Header -->
+  <header class="main-header h-[66px] flex items-center justify-between px-6 tactile-container shrink-0 relative z-10">
+    <div class="flex items-center gap-4">
+      <!-- Workspace switcher -->
+      <div id="ws-switcher" class="relative">
+        <div onclick="toggleWsPicker()" class="flex items-center gap-2 bg-white/80 px-4 py-2 rounded-full border border-white shadow-sm cursor-pointer hover:bg-white transition-colors">
+          <div class="w-2 h-2 rounded-full bg-green-500 dot-pulse"></div>
+          <span id="ws-name" class="text-sm font-semibold tracking-tight font-mono">—</span>
+          <i data-lucide="chevron-down" class="w-4 h-4 opacity-40"></i>
+        </div>
+        <div id="ws-picker" class="hidden fixed bg-white/95 backdrop-blur-xl border border-white/80 rounded-2xl shadow-xl overflow-hidden z-[9999] min-w-48">
+          <div id="ws-list" class="py-1.5"></div>
+          <div class="border-t border-slate-100 p-2">
+            <button onclick="showNewWs()" class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-slate-50 text-[11px] font-mono opacity-50 hover:opacity-80 transition-opacity">
+              <i data-lucide="plus" class="w-3 h-3"></i>新建工作区
+            </button>
+          </div>
+        </div>
+      </div>
+      <span class="w-px h-4 bg-slate-200 hidden sm:block"></span>
+      <div class="hidden md:flex items-center gap-1.5 text-[10px] font-mono opacity-35">
+        <i data-lucide="lock" class="w-3 h-3"></i>
+        <span id="lock-status">锁: 空闲 · 队列: 0</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-5">
+      <!-- Service pills -->
+      <div class="header-pills flex items-center gap-3 font-mono text-[10px]">
+        <span id="pill-runner" class="flex items-center gap-1.5 opacity-45"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>运行器</span>
+        <span id="pill-memory" class="flex items-center gap-1.5 opacity-45"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>记忆</span>
+        <span id="pill-lark"   class="flex items-center gap-1.5 opacity-45"><span class="w-1.5 h-1.5 rounded-full bg-slate-300 inline-block"></span>飞书</span>
+      </div>
+      <span class="w-px h-4 bg-slate-200 hidden sm:block"></span>
+      <div class="text-right hidden sm:block">
+        <p class="text-[9px] font-bold opacity-25 uppercase tracking-[0.2em]">运行器状态</p>
+        <p id="runner-detail" class="text-[11px] font-mono">—</p>
+      </div>
+      <div id="avatar" class="w-9 h-9 rounded-full bg-slate-200 border-2 border-white shadow-sm flex items-center justify-center text-[10px] font-bold">—</div>
+    </div>
+  </header>
+
+  <!-- ══ VIEW 1: 对话 ══ -->
+  <section id="view-intelligence" class="view-content active flex-1 gap-3 min-h-0">
+
+    <!-- 会话侧边栏 -->
+    <div class="chat-sidebar w-56 tactile-container flex flex-col overflow-hidden shrink-0">
+      <div class="px-5 pt-5 pb-3 shrink-0">
+        <div class="flex items-center justify-between mb-3">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">会话记录</p>
+          <button onclick="newSession()" class="w-6 h-6 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 flex items-center justify-center transition-colors">
+            <i data-lucide="plus" class="w-3 h-3 text-oxygen-blue"></i>
+          </button>
+        </div>
+        <div onclick="toggleWsPicker()" class="flex items-center gap-2 bg-white/70 px-3 py-2 rounded-2xl border border-white text-[10px] font-mono opacity-60 cursor-pointer hover:opacity-80 transition-opacity">
+          <i data-lucide="folder-open" class="w-3 h-3"></i>
+          <span id="ws-name-sidebar" class="truncate">—</span>
+          <i data-lucide="chevrons-up-down" class="w-3 h-3 ml-auto shrink-0 opacity-40"></i>
+        </div>
+      </div>
+      <div id="session-list" class="flex-1 overflow-y-auto no-scrollbar px-3 pb-4 space-y-1">
+        <p class="text-[10px] font-mono opacity-30 text-center py-4">加载中…</p>
+      </div>
+    </div>
+
+    <!-- 主对话区 -->
+    <div class="flex-1 flex flex-col gap-3 min-h-0 min-w-0">
+
+      <!-- 状态栏 -->
+      <div class="flex items-center justify-between px-1">
+        <div class="flex items-center gap-3">
+          <div id="memory-bar" class="hidden flex items-center gap-2 bg-oxygen-blue/7 border border-oxygen-blue/12 px-4 py-1.5 rounded-full text-[10px] font-bold text-oxygen-blue tracking-[0.07em] uppercase">
+            <i data-lucide="brain-circuit" class="w-3 h-3"></i>
+            <span id="memory-text">记忆加载中…</span>
+          </div>
+          <div class="flex items-center gap-1.5 bg-slate-100 px-3 py-1.5 rounded-full text-[10px] font-mono text-slate-500">
+            <i data-lucide="layers" class="w-3 h-3"></i>
+            <span id="ctx-turns">上下文: 0 / 20 轮</span>
+          </div>
+        </div>
+        <div class="text-[10px] font-mono opacity-30 flex items-center gap-1.5">
+          <i data-lucide="globe" class="w-3 h-3"></i>渠道: Web
+        </div>
+      </div>
+
+      <!-- 消息区 -->
+      <div id="msg-list" class="flex-1 tactile-container p-7 flex flex-col no-scrollbar overflow-y-auto space-y-5 min-h-0">
+        <!-- 空状态 -->
+        <div id="empty-state" class="flex-1 flex flex-col items-center justify-center opacity-30">
+          <i data-lucide="message-circle" class="w-10 h-10 mb-3"></i>
+          <p class="text-sm font-light">选择工作区，开始对话</p>
+        </div>
+      </div>
+
+      <!-- 排队提示 -->
+      <div id="queue-banner" class="hidden queue-banner rounded-2xl px-5 py-3 flex items-center gap-3">
+        <i data-lucide="hourglass" class="w-4 h-4 text-oxygen-blue opacity-60 shrink-0"></i>
+        <p id="queue-text" class="text-[11px] text-oxygen-blue opacity-70"></p>
+        <button onclick="cancelQueue()" class="ml-auto text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors">取消</button>
+      </div>
+
+      <!-- 输入区 + 指令浮层 -->
+      <div class="relative shrink-0">
+        <!-- 指令浮层 -->
+        <div id="cmd-palette" class="cmd-palette">
+          <div class="px-4 pt-3 pb-1 border-b border-slate-100">
+            <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">可用指令</p>
+          </div>
+          <div id="cmd-list" class="py-1.5"></div>
+        </div>
+        <!-- 文件预览区域 -->
+        <div id="upload-preview" class="hidden mb-2 flex flex-wrap gap-2 px-2"></div>
+        <!-- 输入框 -->
+        <div id="chat-input-area" class="h-auto min-h-[76px] tactile-container px-7 py-3 flex items-end gap-6 bg-white/40"
+             ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+          <input type="file" id="file-input" class="hidden" multiple
+                 accept="image/*,.pdf,.txt,.md,.csv,.json"
+                 onchange="handleFileSelect(event)">
+          <button onclick="$('file-input').click()" class="shrink-0 mb-3 hover:opacity-70 transition-opacity" title="上传文件">
+            <i data-lucide="paperclip" class="w-[18px] h-[18px] opacity-40"></i>
+          </button>
+          <textarea id="chat-input" rows="1"
+            placeholder="向 Claude 下达指令… 输入 / 查看命令&#10;支持拖拽文件到此处&#10;Shift+Enter 换行"
+            class="flex-1 bg-transparent border-none outline-none font-light min-w-0 resize-none py-2"
+            style="min-height: 44px; max-height: 200px; font-size: 15px; padding: 10px 14px 14px; line-height: 1.6;"
+            oninput="onChatInput(this); autoResizeTextarea(this)"
+            onkeydown="onChatKey(event)"></textarea>
+          <div class="flex items-center gap-1 opacity-30 shrink-0 mb-3">
+            <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">⌘</kbd>
+            <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">Enter</kbd>
+          </div>
+          <button onclick="sendMessage()" class="bg-oxygen-blue text-white p-2.5 rounded-2xl shadow-md shadow-oxygen-blue/20 shrink-0 hover:opacity-85 transition-opacity mb-1">
+            <i data-lucide="send" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /主对话区 -->
+  </section>
+
+  <!-- ══ VIEW 2: 工程化（文件编辑器 + 终端）══ -->
+  <section id="view-engineering" class="view-content flex-1 flex min-h-0 engineering-layout">
+    <!-- 文件树侧边栏 -->
+    <div class="file-tree tactile-container flex flex-col overflow-hidden">
+      <!-- 文件树工具栏 -->
+      <div class="px-3 py-2 border-b border-slate-100/50">
+        <div class="flex items-center justify-between mb-2">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">文件</p>
+          <div class="flex items-center gap-1">
+            <button onclick="showNewFileInput('.')" class="p-1.5 rounded-lg hover:bg-white/50 transition-colors" title="新建文件">
+              <i data-lucide="file-plus" class="w-3.5 h-3.5 opacity-50"></i>
+            </button>
+            <button onclick="showNewFolderInput('.')" class="p-1.5 rounded-lg hover:bg-white/50 transition-colors" title="新建目录">
+              <i data-lucide="folder-plus" class="w-3.5 h-3.5 opacity-50"></i>
+            </button>
+            <button onclick="refreshFileTree()" class="p-1.5 rounded-lg hover:bg-white/50 transition-colors" title="刷新">
+              <i data-lucide="refresh-cw" class="w-3.5 h-3.5 opacity-50"></i>
+            </button>
+          </div>
+        </div>
+        <!-- 新建文件/目录输入框 -->
+        <div id="new-file-input-container" class="hidden">
+          <div class="flex items-center gap-2">
+            <input type="text" id="new-file-input" placeholder="文件名..."
+              class="flex-1 px-2 py-1 text-[11px] bg-white/70 rounded border border-slate-200 outline-none focus:border-oxygen-blue/40"
+              onkeydown="handleNewFileKey(event)"
+              onblur="hideNewFileInput()">
+          </div>
+        </div>
+        <div id="new-folder-input-container" class="hidden">
+          <div class="flex items-center gap-2">
+            <input type="text" id="new-folder-input" placeholder="目录名..."
+              class="flex-1 px-2 py-1 text-[11px] bg-white/70 rounded border border-slate-200 outline-none focus:border-oxygen-blue/40"
+              onkeydown="handleNewFolderKey(event)"
+              onblur="hideNewFolderInput()">
+          </div>
+        </div>
+      </div>
+      <div id="file-tree" class="flex-1 overflow-y-auto no-scrollbar p-2">
+        <p class="text-[10px] font-mono opacity-30 text-center py-4">选择工作区加载文件</p>
+      </div>
+    </div>
+
+    <!-- 编辑器和终端区域 -->
+    <div id="editor-terminal-container" class="editor-terminal-panel">
+      <!-- 编辑器区域 -->
+      <div id="editor-panel" class="editor-panel relative">
+        <!-- 编辑器工具栏 -->
+        <div id="editor-toolbar" class="editor-toolbar hidden">
+          <div class="flex items-center gap-3 flex-1 min-w-0">
+            <i data-lucide="file-code" class="w-4 h-4 opacity-40"></i>
+            <span id="editor-filename" class="text-[12px] font-medium truncate">未命名</span>
+            <span id="unsaved-indicator" class="w-2 h-2 rounded-full bg-amber-500 hidden" title="有未保存的更改"></span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="save-status" class="text-[10px] font-mono opacity-0 transition-opacity"></span>
+            <button id="save-btn" onclick="saveCurrentFile()" class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 text-oxygen-blue text-[11px] font-bold transition-colors">
+              <i data-lucide="save" class="w-3.5 h-3.5"></i>
+              <span>保存</span>
+              <span class="opacity-50 text-[9px]">⌘S</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 编辑器容器 -->
+        <div id="editor-container" class="editor-container relative">
+          <div id="editor-empty" class="absolute inset-0 flex flex-col items-center justify-center opacity-30">
+            <i data-lucide="file-code" class="w-12 h-12 mb-3"></i>
+            <p class="text-sm">点击左侧文件开始编辑</p>
+            <p class="text-[10px] font-mono mt-1 opacity-50">Ctrl+S 保存</p>
+          </div>
+          <div id="monaco-editor" class="absolute inset-0 hidden"></div>
+        </div>
+      </div>
+
+      <!-- 拖拽分割线 -->
+      <div id="editor-terminal-divider"></div>
+
+      <!-- 终端面板 -->
+      <div id="terminal-panel" class="terminal-panel">
+        <!-- 终端 Tab 栏 -->
+        <div class="terminal-tab-bar">
+          <div id="terminal-tabs" class="flex items-center gap-1 flex-1 overflow-x-auto no-scrollbar">
+            <!-- Terminal tabs will be rendered here -->
+          </div>
+          <button id="new-terminal-btn" onclick="createNewTerminal()" class="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 text-oxygen-blue text-[10px] font-bold transition-colors shrink-0 h-7">
+            <i data-lucide="plus" class="w-3 h-3"></i>
+            <span>新建</span>
+          </button>
+        </div>
+
+        <!-- 终端容器 -->
+        <div class="terminal-container-wrapper relative">
+          <div id="terminal-container" class="terminal-container w-full h-full relative">
+            <!-- Terminals will be mounted here -->
+            <div id="terminal-empty" class="absolute inset-0 flex flex-col items-center justify-center text-white/30">
+              <i data-lucide="terminal" class="w-10 h-10 mb-2"></i>
+              <p class="text-xs">点击"新建终端"开始</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 终端状态栏 -->
+        <div class="terminal-status-bar">
+          <div class="flex items-center gap-3">
+            <span id="terminal-cwd" class="truncate max-w-[200px]">—</span>
+            <span id="terminal-status" class="flex items-center gap-1.5 text-[10px]">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+              未连接
+            </span>
+          </div>
+          <span id="terminal-count" class="text-[10px]">0 / 5</span>
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- ══ VIEW 3: 定时任务 ══ -->
+  <section id="view-automation" class="view-content flex-1 min-h-0 gap-5">
+    <div class="w-72 tactile-container flex flex-col overflow-hidden shrink-0">
+      <div class="px-5 py-5 border-b border-slate-100/50">
+        <div class="flex items-center justify-between mb-1">
+          <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">任务列表</p>
+          <button class="w-6 h-6 rounded-lg bg-oxygen-blue/10 hover:bg-oxygen-blue/20 flex items-center justify-center transition-colors">
+            <i data-lucide="plus" class="w-3 h-3 text-oxygen-blue"></i>
+          </button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto no-scrollbar p-3">
+        <div class="text-center opacity-30 py-8">
+          <i data-lucide="calendar-clock" class="w-10 h-10 mx-auto mb-3"></i>
+          <p class="text-[11px] font-mono">暂无定时任务</p>
+        </div>
+      </div>
+    </div>
+    <div class="flex-1 tactile-container flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100/50">
+        <div>
+          <p class="font-semibold">任务详情</p>
+          <p class="text-[10px] font-mono opacity-40 mt-0.5">选择任务查看执行历史</p>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center">
+        <div class="text-center opacity-30">
+          <i data-lucide="clock" class="w-12 h-12 mx-auto mb-3"></i>
+          <p class="font-semibold">定时任务</p>
+          <p class="text-sm mt-1">阶段四实现中</p>
+          <p class="text-[11px] font-mono opacity-60 mt-2">支持 cron/interval/once 三种模式</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ VIEW 4: 仪表盘 ══ -->
+  <section id="view-observability" class="view-content flex-1 min-h-0 gap-5 flex-wrap content-start overflow-y-auto">
+    <!-- Token 统计卡片 -->
+    <div class="w-full xl:w-[calc(66%-10px)] h-64 tactile-container p-6 flex flex-col">
+      <div class="flex items-center justify-between mb-4">
+        <p class="font-semibold">Token 消耗</p>
+        <div class="flex items-center gap-2 text-[10px] font-mono opacity-40">
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-oxygen-blue"></span>Input</span>
+          <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-green-500"></span>Output</span>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center opacity-30">
+        <div class="text-center">
+          <i data-lucide="bar-chart-2" class="w-10 h-10 mx-auto mb-2"></i>
+          <p class="text-[11px] font-mono">图表区域</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 系统状态卡片 -->
+    <div class="w-full xl:w-[calc(34%-10px)] h-64 tactile-container p-6 flex flex-col">
+      <p class="font-semibold mb-4">系统状态</p>
+      <div class="flex-1 space-y-3">
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center">
+              <i data-lucide="cpu" class="w-4 h-4 text-green-600"></i>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">运行器</p>
+              <p class="text-[9px] font-mono opacity-40">Agent Runner</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-green-600 bg-green-100 px-2 py-1 rounded-full">正常</span>
+        </div>
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center">
+              <i data-lucide="brain" class="w-4 h-4 text-blue-600"></i>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">记忆服务</p>
+              <p class="text-[9px] font-mono opacity-40">Memory Service</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-blue-600 bg-blue-100 px-2 py-1 rounded-full">正常</span>
+        </div>
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+              <i data-lucide="message-circle" class="w-4 h-4 text-purple-600"></i>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">飞书连接</p>
+              <p class="text-[9px] font-mono opacity-40">Lark Bot</p>
+            </div>
+          </div>
+          <span class="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-1 rounded-full">未配置</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 工作区统计 -->
+    <div class="w-full md:w-[calc(50%-10px)] h-48 tactile-container p-6 flex flex-col">
+      <p class="font-semibold mb-4">工作区分布</p>
+      <div class="flex-1 flex items-center justify-center opacity-30">
+        <p class="text-[11px] font-mono">饼图区域</p>
+      </div>
+    </div>
+
+    <!-- 今日概览 -->
+    <div class="w-full md:w-[calc(50%-10px)] h-48 tactile-container p-6 flex flex-col">
+      <p class="font-semibold mb-4">今日概览</p>
+      <div class="flex-1 grid grid-cols-3 gap-4">
+        <div class="text-center p-3 rounded-xl bg-white/50">
+          <p class="text-2xl font-bold text-oxygen-blue">0</p>
+          <p class="text-[9px] font-mono opacity-40 mt-1">对话次数</p>
+        </div>
+        <div class="text-center p-3 rounded-xl bg-white/50">
+          <p class="text-2xl font-bold text-green-500">0</p>
+          <p class="text-[9px] font-mono opacity-40 mt-1">Token 消耗</p>
+        </div>
+        <div class="text-center p-3 rounded-xl bg-white/50">
+          <p class="text-2xl font-bold text-purple-500">0</p>
+          <p class="text-[9px] font-mono opacity-40 mt-1">终端会话</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ VIEW 5: 日志 ══ -->
+  <section id="view-logs" class="view-content flex-1 min-h-0 gap-5">
+    <div class="w-56 tactile-container flex flex-col overflow-hidden shrink-0">
+      <div class="px-5 py-5 border-b border-slate-100/50">
+        <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">日志分类</p>
+      </div>
+      <div class="flex-1 overflow-y-auto no-scrollbar p-2 space-y-1">
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-oxygen-blue/10 text-oxygen-blue text-[11px] font-medium">
+          <i data-lucide="layers" class="w-3.5 h-3.5"></i>
+          全部日志
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="server" class="w-3.5 h-3.5"></i>
+          系统日志
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="bot" class="w-3.5 h-3.5"></i>
+          SDK 调用
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="calendar" class="w-3.5 h-3.5"></i>
+          任务执行
+        </button>
+        <button class="w-full flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/50 text-[11px] font-medium opacity-60 transition-colors">
+          <i data-lucide="terminal" class="w-3.5 h-3.5"></i>
+          终端记录
+        </button>
+      </div>
+    </div>
+    <div class="flex-1 tactile-container flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100/50">
+        <div class="flex items-center gap-4">
+          <p class="font-semibold">实时日志</p>
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/70 border border-white">
+            <i data-lucide="search" class="w-3 h-3 opacity-40"></i>
+            <input type="text" placeholder="搜索日志..." class="bg-transparent border-none outline-none text-[11px] w-48">
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <button class="p-2 rounded-lg hover:bg-white/50 transition-colors" title="导出">
+            <i data-lucide="download" class="w-4 h-4 opacity-50"></i>
+          </button>
+          <button class="p-2 rounded-lg hover:bg-white/50 transition-colors" title="清空">
+            <i data-lucide="trash-2" class="w-4 h-4 opacity-50"></i>
+          </button>
+        </div>
+      </div>
+      <div class="flex-1 overflow-y-auto no-scrollbar p-4 font-mono text-[11px] space-y-2">
+        <div class="text-center opacity-30 py-8">
+          <i data-lucide="scroll-text" class="w-10 h-10 mx-auto mb-3"></i>
+          <p class="text-[11px]">日志服务</p>
+          <p class="text-sm mt-1">阶段六实现中</p>
+          <p class="text-[10px] mt-2 opacity-60">支持实时推送、关键词搜索、分类筛选</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div><!-- /main -->
+
+<script>
+// ─────────────────────────────────────────────
+// 状态
+// ─────────────────────────────────────────────
+const state = {
+  workspaces: [],
+  currentWs: null,       // { id, name, ... }
+  sessions: [],
+  currentSession: null,  // { id, ... }
+  messages: [],          // 渲染用，{ role, content, toolCalls, id }
+  streaming: false,
+  streamBuf: '',          // 当前流式文字缓冲
+  streamMsgId: null,
+  ws: null,              // WebSocket
+  ctxTurns: 0,
+  systemStatus: {},
+  terminals: [],         // { id, title, cwd, ws, xterm, fitAddon, container }
+  currentTerminal: null, // 当前活跃的终端 id
+  maxTerminals: 5,
+  uploads: [],           // 当前待发送的文件附件 { id, name, type, base64?, content?, url? }
+  // 编辑器状态
+  editor: null,          // Monaco editor 实例
+  editorFiles: [],       // 打开的文件列表 { id, path, content, originalContent, language, isModified }
+  currentEditorFile: null, // 当前编辑的文件 id
+  // 文件树状态（VSCode 树形模式）
+  treeNodes: new Map(),  // Map<path, TreeNode> 所有加载过的节点
+  expandedPaths: new Set(['.']), // 展开的目录路径集合，默认展开根目录
+  selectedTreePath: null, // 当前选中的路径
+  newFileTargetPath: '.', // 新建文件的目标目录
+  newFolderTargetPath: '.', // 新建目录的目标目录
+  clipboard: null, // { type: 'cut'|'copy', path, isDirectory }
+  isEditorLoading: false,
+}
+
+// ─────────────────────────────────────────────
+// 工具函数
+// ─────────────────────────────────────────────
+const $ = id => document.getElementById(id)
+const api = async (path, opts = {}) => {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    ...opts,
+    body: opts.body ? JSON.stringify(opts.body) : undefined
+  })
+  if (res.status === 401) { showLogin(); return null }
+  if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+  return res.json()
+}
+const uid = () => Math.random().toString(36).slice(2)
+
+// ─────────────────────────────────────────────
+// 登录 / 登出
+// ─────────────────────────────────────────────
+function showLogin() {
+  $('login-screen').classList.remove('hidden')
+}
+async function doLogin() {
+  const user = $('login-user').value.trim()
+  const pass = $('login-pass').value
+  const err  = $('login-err')
+  err.classList.add('hidden')
+  try {
+    await api('/api/auth/login', { method:'POST', body:{ username:user, password:pass } })
+    $('login-screen').classList.add('hidden')
+    init()
+  } catch(e) {
+    err.textContent = '用户名或密码错误'
+    err.classList.remove('hidden')
+  }
+}
+async function doLogout() {
+  await api('/api/auth/logout', { method:'POST' })
+  showLogin()
+}
+$('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin() })
+
+// ─────────────────────────────────────────────
+// 初始化
+// ─────────────────────────────────────────────
+async function init() {
+  const me = await api('/api/auth/me')
+  if (!me) return
+  // 字段映射: API 返回 { user: { userId, role } }
+  const user = me.user || me
+  $('avatar').textContent = (user.userId || user.username || 'AD').slice(0,2).toUpperCase()
+  await loadWorkspaces()
+  startStatusPoll()
+}
+
+// ─────────────────────────────────────────────
+// 工作区
+// ─────────────────────────────────────────────
+async function loadWorkspaces() {
+  const data = await api('/api/workspaces')
+  if (!data) return
+  // 字段映射: API 返回 { workspaces: [...] }，每个 workspace 有 id, name, status, created_at, last_active_at
+  state.workspaces = data.workspaces || []
+  renderWsList()
+  const first = state.workspaces.find(w => w.status === 'active') || state.workspaces[0]
+  if (first) await selectWorkspace(first)
+}
+
+function renderWsList() {
+  const el = $('ws-list')
+  el.innerHTML = state.workspaces.map((w, i) => `
+    <div class="ws-item relative group" data-index="${i}">
+      <button onclick="selectWorkspaceByIndex(this.closest('.ws-item').dataset.index)" class="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-50 text-left transition-colors ${state.currentWs?.id===w.id?'text-oxygen-blue font-semibold':'opacity-60'}">
+        <span class="w-1.5 h-1.5 rounded-full ${w.status==='active'?'bg-green-500':'bg-slate-300'} shrink-0"></span>
+        <span class="text-[11px] font-mono truncate flex-1">${w.name}</span>
+      </button>
+      <button onclick="toggleWsMenu(event, ${i})" class="menu-btn absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-opacity">
+        <i data-lucide="more-horizontal" class="w-3.5 h-3.5 opacity-50"></i>
+      </button>
+      <div id="ws-menu-${i}" class="dropdown-menu">
+        <div class="dropdown-item" onclick="renameWorkspace(${i})"><i data-lucide="pencil" class="w-3 h-3"></i>重命名</div>
+        <div class="dropdown-item delete" onclick="deleteWorkspace(${i})"><i data-lucide="trash-2" class="w-3 h-3"></i>删除</div>
+      </div>
+    </div>`).join('')
+  lucide.createIcons({ nodes: [el] })
+}
+
+function selectWorkspaceByIndex(index) {
+  const ws = state.workspaces[parseInt(index)]
+  if (ws) selectWorkspace(ws)
+}
+
+async function selectWorkspace(ws) {
+  state.currentWs = ws
+  $('ws-name').textContent = ws.name
+  $('ws-name-sidebar').textContent = ws.name
+  $('mobile-ws-name').textContent = ws.name  // 移动端工作区名称
+  $('ws-picker').classList.add('hidden')
+  renderWsList()
+  await loadSessions()
+  connectWS()
+  // 恢复该工作区的终端会话
+  await restoreTerminals(ws.id)
+  // 初始化文件树状态并加载
+  state.treeNodes.clear()
+  state.expandedPaths = new Set(['.'])
+  await loadFileTree()
+}
+
+function toggleWsPicker() {
+  const picker = $('ws-picker')
+  const isHidden = picker.classList.contains('hidden')
+
+  if (isHidden) {
+    // 计算坐标
+    const btn = $('ws-switcher').getBoundingClientRect()
+    picker.style.top = (btn.bottom + 8) + 'px'
+    picker.style.left = btn.left + 'px'
+    picker.classList.remove('hidden')
+  } else {
+    picker.classList.add('hidden')
+  }
+
+  // 关闭所有菜单
+  document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('open'))
+}
+
+function showNewWs() {
+  $('new-ws-name').value = ''
+  $('new-ws-desc').value = ''
+  $('new-ws-err').classList.add('hidden')
+  $('new-ws-modal').classList.add('open')
+  $('new-ws-name').focus()
+}
+
+function closeNewWsModal() {
+  $('new-ws-modal').classList.remove('open')
+}
+
+async function doCreateWorkspace() {
+  const name = $('new-ws-name').value.trim()
+  const desc = $('new-ws-desc').value.trim()
+  const err = $('new-ws-err')
+
+  if (!name) {
+    err.textContent = '请输入工作区名称'
+    err.classList.remove('hidden')
+    return
+  }
+
+  try {
+    await api('/api/workspaces', { method: 'POST', body: { name, description: desc } })
+    closeNewWsModal()
+    await loadWorkspaces()
+  } catch (e) {
+    err.textContent = '创建失败：' + e.message
+    err.classList.remove('hidden')
+  }
+}
+
+// 工作区菜单控制
+function toggleWsMenu(event, index) {
+  event.stopPropagation()
+  const menu = $(`ws-menu-${index}`)
+  const isOpen = menu.classList.contains('open')
+  // 关闭所有菜单
+  document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('open'))
+  // 切换当前菜单
+  if (!isOpen) {
+    menu.classList.add('open')
+    lucide.createIcons({ nodes: [menu] })
+  }
+}
+
+async function renameWorkspace(index) {
+  const ws = state.workspaces[index]
+  if (!ws) return
+  const newName = prompt('重命名工作区：', ws.name)
+  if (!newName || newName === ws.name) return
+
+  try {
+    await api(`/api/workspaces/${ws.id}`, { method: 'PUT', body: { name: newName } })
+    await loadWorkspaces()
+  } catch (e) {
+    alert('重命名失败：' + e.message)
+  }
+}
+
+async function deleteWorkspace(index) {
+  const ws = state.workspaces[index]
+  if (!ws) return
+
+  // 检查是否为当前工作区
+  if (state.currentWs?.id === ws.id) {
+    alert('请先切换到其他工作区')
+    return
+  }
+
+  if (!confirm(`确定要删除工作区「${ws.name}」吗？此操作不可恢复。`)) return
+
+  try {
+    await api(`/api/workspaces/${ws.id}`, { method: 'DELETE' })
+    await loadWorkspaces()
+  } catch (e) {
+    alert('删除失败：' + e.message)
+  }
+}
+
+// 会话菜单控制
+function toggleSessionMenu(event, index) {
+  event.stopPropagation()
+  const menu = $(`session-menu-${index}`)
+  const isOpen = menu.classList.contains('open')
+  // 关闭所有菜单
+  document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('open'))
+  // 切换当前菜单
+  if (!isOpen) {
+    menu.classList.add('open')
+    lucide.createIcons({ nodes: [menu] })
+  }
+}
+
+async function renameSession(index) {
+  const s = state.sessions[index]
+  if (!s) return
+  const currentTitle = s.title || s.firstMessage?.slice(0,20) || '新建对话'
+  const newTitle = prompt('重命名会话：', currentTitle)
+  if (!newTitle || newTitle === currentTitle) return
+
+  try {
+    await api(`/api/sessions/${s.id}`, { method: 'PUT', body: { title: newTitle } })
+    await loadSessions()
+  } catch (e) {
+    alert('重命名失败：' + e.message)
+  }
+}
+
+async function deleteSession(index) {
+  const s = state.sessions[index]
+  if (!s) return
+
+  if (!confirm('确定要删除此会话吗？相关消息记录将被永久删除。')) return
+
+  try {
+    await api(`/api/sessions/${s.id}`, { method: 'DELETE' })
+    // 如果删除的是当前会话，清空当前会话
+    if (state.currentSession?.id === s.id) {
+      state.currentSession = null
+      state.messages = []
+      clearMessages()
+    }
+    await loadSessions()
+  } catch (e) {
+    alert('删除失败：' + e.message)
+  }
+}
+
+// 点击外部关闭菜单
+document.addEventListener('click', e => {
+  if (!e.target.closest('.dropdown-menu') && !e.target.closest('.menu-btn')) {
+    document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.remove('open'))
+  }
+  if (!e.target.closest('#ws-switcher')) $('ws-picker')?.classList.add('hidden')
+  if (!e.target.closest('#new-ws-modal') && $('new-ws-modal')?.classList.contains('open')) {
+    // 点击 modal 外部不关闭，只能通过取消按钮
+  }
+})
+
+// Modal 键盘事件
+$('new-ws-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('new-ws-desc').focus()
+})
+$('new-ws-desc').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doCreateWorkspace()
+  if (e.key === 'Escape') closeNewWsModal()
+})
+
+// ─────────────────────────────────────────────
+// 会话
+// ─────────────────────────────────────────────
+async function loadSessions() {
+  if (!state.currentWs) return
+  const data = await api(`/api/sessions?workspaceId=${state.currentWs.id}`)
+  if (!data) return
+  // 字段映射: API 返回 { sessions: [...] }，每个 session 有 id, started_at(映射为createdAt), messageCount, firstMessage
+  state.sessions = data.sessions || []
+  renderSessionList()
+  // 选最新一个
+  if (state.sessions.length > 0 && !state.currentSession) {
+    await selectSession(state.sessions[0])
+  } else if (state.sessions.length === 0) {
+    await newSession()
+  }
+}
+
+function renderSessionList() {
+  const el = $('session-list')
+  if (state.sessions.length === 0) {
+    el.innerHTML = '<p class="text-[10px] font-mono opacity-30 text-center py-4">暂无会话</p>'
+    return
+  }
+  el.innerHTML = state.sessions.map((s, i) => {
+    // 字段映射: firstMessage 取前20字作为标题，createdAt 是 started_at 的别名
+    const title = s.title || s.firstMessage?.slice(0,20) || '新建对话'
+    const date  = fmtDate(s.createdAt)
+    const turns = s.messageCount ? Math.floor(s.messageCount/2) : 0
+    const active = state.currentSession?.id === s.id
+    return `
+    <div data-index="${i}" class="session-item relative group ${active?'active':''} px-3 py-3 rounded-2xl">
+      <div onclick="selectSessionByIndex(this.closest('.session-item').dataset.index)" class="cursor-pointer">
+        <div class="flex items-start justify-between gap-1 mb-1">
+          <p class="text-[11px] font-semibold leading-tight truncate ${active?'':'opacity-60'}">${escHtml(title)}</p>
+          <span class="text-[8px] font-mono opacity-30 shrink-0 mt-0.5">${date}</span>
+        </div>
+        ${turns ? `<span class="text-[8px] font-mono opacity-20 mt-1 block">${turns} 轮</span>` : ''}
+      </div>
+      <button onclick="toggleSessionMenu(event, ${i})" class="menu-btn absolute right-2 top-2 p-1.5 rounded-lg hover:bg-slate-100 opacity-0 group-hover:opacity-100 transition-opacity">
+        <i data-lucide="more-horizontal" class="w-3.5 h-3.5 opacity-50"></i>
+      </button>
+      <div id="session-menu-${i}" class="dropdown-menu">
+        <div class="dropdown-item" onclick="renameSession(${i})"><i data-lucide="pencil" class="w-3 h-3"></i>重命名</div>
+        <div class="dropdown-item delete" onclick="deleteSession(${i})"><i data-lucide="trash-2" class="w-3 h-3"></i>删除</div>
+      </div>
+    </div>`
+  }).join('')
+  lucide.createIcons({ nodes: [el] })
+}
+
+function selectSessionByIndex(index) {
+  const s = state.sessions[parseInt(index)]
+  if (s) selectSession(s)
+}
+
+async function selectSession(s) {
+  state.currentSession = s
+  state.messages = []
+  state.ctxTurns = 0
+  renderSessionList()
+  await loadHistory()
+}
+
+async function newSession() {
+  if (!state.currentWs) return
+  const data = await api('/api/sessions', { method:'POST', body:{ workspaceId: state.currentWs.id } })
+  if (!data) return
+  // 字段映射: API 返回 { success, session: { id, createdAt, messageCount, firstMessage } }
+  const sess = data.session || data
+  state.sessions.unshift(sess)
+  await selectSession(sess)
+  $('chat-input').focus()
+}
+
+async function loadHistory() {
+  if (!state.currentSession) return
+  const data = await api(`/api/sessions/${state.currentSession.id}/messages`)
+  if (!data) return
+  // 字段映射: API 返回 { messages: [...] }，每个 message 有 id, role, content, created_at
+  const msgs = data.messages || []
+  state.messages = []
+  // 清空并重渲染
+  clearMessages()
+  msgs.forEach(m => {
+    appendMessage({ role: m.role, content: m.content, id: m.id })
+  })
+  state.ctxTurns = Math.floor(msgs.length / 2)
+  $('ctx-turns').textContent = `上下文: ${state.ctxTurns} / 20 轮`
+  scrollToBottom()
+}
+
+// ─────────────────────────────────────────────
+// WebSocket
+// ─────────────────────────────────────────────
+function connectWS() {
+  if (state.ws) { state.ws.close(); state.ws = null }
+  if (!state.currentWs) return
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  const ws = new WebSocket(`${proto}://${location.host}/ws/chat/${state.currentWs.id}`)
+  state.ws = ws
+
+  ws.onmessage = e => {
+    let ev
+    try { ev = JSON.parse(e.data) } catch { return }
+    handleWsEvent(ev)
+  }
+  ws.onclose = () => {
+    // 断线3秒后重连
+    setTimeout(() => { if (state.currentWs) connectWS() }, 3000)
+  }
+}
+
+function handleWsEvent(ev) {
+  switch (ev.type) {
+    case 'text':
+      onStreamToken(ev.payload)
+      break
+    case 'tool_call':
+      onToolCall(ev.payload)
+      break
+    case 'tool_result':
+      onToolResult(ev.payload)
+      break
+    case 'usage':
+      // token 统计，目前只更新轮数
+      state.ctxTurns++
+      $('ctx-turns').textContent = `上下文: ${state.ctxTurns} / 20 轮`
+      break
+    case 'done':
+      onStreamDone()
+      break
+    case 'error':
+      onStreamError(ev.payload)
+      break
+    case 'queue_position':
+      onQueuePosition(ev.position)
+      break
+  }
+}
+
+// ─────────────────────────────────────────────
+// 发消息
+// ─────────────────────────────────────────────
+async function sendMessage() {
+  const input = $('chat-input')
+  const text  = input.value.trim()
+  if ((!text && state.uploads.length === 0) || state.streaming) return
+  if (!state.currentWs || !state.currentSession) {
+    alert('请先选择工作区')
+    return
+  }
+
+  // 处理指令（仅纯文本）
+  if (text.startsWith('/')) {
+    execCommand(text)
+    input.value = ''
+    resetTextareaHeight(input)
+    return
+  }
+
+  input.value = ''
+  resetTextareaHeight(input)
+  closeCmdPalette()
+
+  // 构建 content：字符串或数组
+  let content
+  if (state.uploads.length === 0) {
+    content = text
+  } else {
+    // 多模态 content 数组
+    content = []
+    // 先添加所有附件
+    for (const file of state.uploads) {
+      if (file.type === 'image') {
+        content.push({
+          type: 'image',
+          source: { type: 'base64', media_type: file.mediaType, data: file.base64 }
+        })
+      } else if (file.type === 'document' && file.mimeType === 'application/pdf') {
+        content.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: file.base64 }
+        })
+      } else if (file.type === 'text' && file.content) {
+        // 文本文件作为 text block 添加
+        content.push({
+          type: 'text',
+          text: `[文件: ${file.name}]\n\n${file.content.slice(0, 10000)}` // 限制 10KB 文本
+        })
+      }
+    }
+    // 最后添加用户输入的文本
+    if (text) {
+      content.push({ type: 'text', text })
+    }
+  }
+
+  // 渲染用户消息（包含附件预览）
+  const displayContent = text || (state.uploads.length > 0 ? `[${state.uploads.length} 个附件]` : '')
+  appendMessage({ role:'user', content: displayContent, uploads: [...state.uploads], id:uid() })
+  scrollToBottom()
+
+  // 清空上传队列
+  state.uploads = []
+  renderUploadPreviews()
+
+  state.streaming = true
+  state.streamBuf  = ''
+  state.streamMsgId = uid()
+
+  // 创建空的 assistant bubble 用于流式填充
+  appendStreamingBubble(state.streamMsgId)
+  scrollToBottom()
+
+  try {
+    await api('/api/chat', {
+      method: 'POST',
+      body: {
+        workspaceId: state.currentWs.id,
+        sessionId:   state.currentSession.id,
+        content:     content,
+        messageId:   uid()
+      }
+    })
+  } catch(e) {
+    onStreamError(e.message)
+  }
+}
+
+// ─────────────────────────────────────────────
+// 流式渲染
+// ─────────────────────────────────────────────
+function appendStreamingBubble(id) {
+  const list = $('msg-list')
+  $('empty-state')?.remove()
+  const wrap = document.createElement('div')
+  wrap.className = 'flex justify-start items-start gap-3 msg-assistant'
+  wrap.innerHTML = `
+    <div class="w-8 h-8 rounded-xl bg-deep-charcoal flex items-center justify-center shrink-0">
+      <i data-lucide="bot" class="w-4 h-4 text-white"></i>
+    </div>
+    <div class="max-w-[82%] space-y-2">
+      <div id="stream-${id}" class="bubble p-5">
+        <p class="text-sm leading-relaxed streaming-text"></p>
+      </div>
+    </div>`
+  list.appendChild(wrap)
+  lucide.createIcons({ nodes: [wrap] })
+}
+
+function onStreamToken(chunk) {
+  state.streamBuf += chunk
+  const el = $('stream-' + state.streamMsgId)
+  if (!el) return
+  const p = el.querySelector('.streaming-text')
+  if (p) {
+    // 使用 marked 实时渲染 Markdown
+    p.innerHTML = marked.parse(state.streamBuf) + '<span class="stream-cursor"></span>'
+  }
+  scrollToBottom()
+}
+
+function onStreamDone() {
+  state.streaming = false
+  // 移除光标
+  const el = $('stream-' + state.streamMsgId)
+  if (el) {
+    const p = el.querySelector('.streaming-text')
+    if (p) p.innerHTML = renderMarkdown(state.streamBuf)
+  }
+  $('queue-banner').classList.add('hidden')
+  state.streamBuf = ''
+  scrollToBottom()
+}
+
+function onStreamError(msg) {
+  state.streaming = false
+  const el = $('stream-' + state.streamMsgId)
+  if (el) {
+    el.classList.add('border-red-200', 'bg-red-50/50')
+    const p = el.querySelector('.streaming-text')
+    if (p) p.innerHTML = `<span class="text-red-400 text-[12px] font-mono">⚠ 出错: ${escHtml(String(msg))}</span>`
+  }
+}
+
+function onToolCall(payload) {
+  // payload: { tool_use_id, name, input }
+  const msgBox = $('stream-' + state.streamMsgId)?.closest('.msg-assistant')?.querySelector('.max-w-\\[82\\%\\]')
+  if (!msgBox) return
+  const streamEl = $('stream-' + state.streamMsgId)
+  const block = document.createElement('div')
+  block.id = 'tool-' + payload.tool_use_id
+  const colorMap = { read_file:'blue', write_file:'blue', bash:'orange', create_task:'orange', todo_write:'purple', todo_read:'purple', read_skill:'green' }
+  const col = colorMap[payload.name] || 'slate'
+  block.className = `tool-block bg-${col}-500/4 border border-${col}-500/12 rounded-[1.25rem]`
+  block.innerHTML = `
+    <div class="flex items-center gap-3 px-4 py-3 cursor-pointer select-none" onclick="toggleTool(this)">
+      <div class="w-5 h-5 rounded-lg bg-${col}-500/15 flex items-center justify-center shrink-0">
+        <i data-lucide="terminal" class="w-3 h-3 text-${col}-500"></i>
+      </div>
+      <span class="text-[11px] font-mono font-bold text-${col}-500">${escHtml(payload.name)}</span>
+      <span class="text-[11px] font-mono opacity-40">${escHtml(JSON.stringify(payload.input || '').slice(0,40))}</span>
+      <span class="tool-status ml-auto text-[10px] bg-oxygen-blue/10 text-oxygen-blue px-2 py-0.5 rounded-full font-bold">执行中…</span>
+      <i data-lucide="chevron-down" class="w-3.5 h-3.5 opacity-30 tool-chevron"></i>
+    </div>
+    <div class="tool-body hidden px-4 pb-3">
+      <pre class="text-[10px] font-mono text-slate-500 bg-slate-50 rounded-xl p-3 overflow-x-auto tool-result">等待执行结果...</pre>
+    </div>
+  `
+  msgBox.insertBefore(block, streamEl)
+  lucide.createIcons({ nodes: [block] })
+  scrollToBottom()
+}
+
+function onToolResult(payload) {
+  const block = $('tool-' + payload.tool_use_id)
+  if (!block) return
+
+  const result = payload.result || {}
+  const isSuccess = result.success !== false  // 默认为 true（兼容旧工具）
+
+  // 更新状态标签
+  const statusBadge = block.querySelector('.tool-status')
+  if (statusBadge) {
+    if (isSuccess) {
+      statusBadge.textContent = '完成'
+      statusBadge.className = 'tool-status ml-auto text-[10px] bg-green-500/10 text-green-600 px-2 py-0.5 rounded-full font-bold'
+    } else {
+      statusBadge.textContent = '失败'
+      statusBadge.className = 'tool-status ml-auto text-[10px] bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full font-bold'
+    }
+  }
+
+  // 更新边框颜色（失败时变红）
+  if (!isSuccess) {
+    block.className = block.className.replace(/border-\w+-500\/12/, 'border-red-500/30').replace(/bg-\w+-500\/4/, 'bg-red-500/5')
+  }
+
+  // 更新结果内容
+  const resultEl = block.querySelector('.tool-result')
+  if (resultEl) {
+    let displayText = ''
+
+    // 处理 bash 工具的特定格式
+    if (result.output !== undefined) {
+      // 新格式：{ success, output, exit_code, elapsed_ms }
+      const lines = [
+        `退出码: ${result.exit_code ?? 'N/A'}`,
+        `耗时: ${result.elapsed_ms ?? '?'}ms`,
+        result.truncated ? '[输出已截断]' : null,
+        '---',
+        result.output,
+      ].filter(Boolean)
+      displayText = lines.join('\n')
+    } else {
+      // 旧格式或其他工具
+      displayText = typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+    }
+
+    resultEl.textContent = displayText
+  }
+
+  const body = block.querySelector('.tool-body')
+  if (body) body.classList.remove('hidden')
+  scrollToBottom()
+}
+
+function onQueuePosition(pos) {
+  // 后端发送: 'waiting' | 'executing' | number
+  if (pos === 'waiting') {
+    $('queue-banner').classList.remove('hidden')
+    $('queue-text').innerHTML = '正在排队等待处理…'
+    $('lock-status').textContent = '锁: 等待中'
+  } else if (pos === 'executing') {
+    $('queue-banner').classList.remove('hidden')
+    $('queue-text').innerHTML = '<b>正在执行中…</b>'
+    $('lock-status').textContent = '锁: 持有中'
+  } else if (typeof pos === 'number' && pos > 0) {
+    $('queue-banner').classList.remove('hidden')
+    $('queue-text').innerHTML = `正在处理上一条指令，已排队第 <b>${pos}</b> 位…`
+    $('lock-status').textContent = `锁: 持有中 · 队列: ${pos}`
+  } else {
+    $('queue-banner').classList.add('hidden')
+    $('lock-status').textContent = '锁: 空闲 · 队列: 0'
+  }
+}
+
+function cancelQueue() {
+  // TODO: 后续实现取消逻辑（发送 cancel 信号到 WS）
+  $('queue-banner').classList.add('hidden')
+}
+
+// ─────────────────────────────────────────────
+// 历史消息渲染
+// ─────────────────────────────────────────────
+function clearMessages() {
+  const list = $('msg-list')
+  list.innerHTML = ''
+  // 重新插入空状态（如需）
+}
+
+function appendMessage({ role, content, id, uploads = [] }) {
+  const list  = $('msg-list')
+  $('empty-state')?.remove()
+  const wrap = document.createElement('div')
+
+  if (role === 'user') {
+    wrap.className = 'flex justify-end gap-3 msg-user'
+    // User content 可能是字符串、多模态数组或 tool_result 数组
+    let displayContent = ''
+    let mediaBlocks = []
+
+    if (Array.isArray(content)) {
+      // 多模态数组：提取 text 和 image/document blocks
+      const textParts = []
+      for (const block of content) {
+        if (block.type === 'text') {
+          textParts.push(block.text)
+        } else if (block.type === 'image' && block.source?.data) {
+          mediaBlocks.push({ type: 'image', mime: block.source.media_type, data: block.source.data })
+        } else if (block.type === 'document' && block.source?.data) {
+          mediaBlocks.push({ type: 'document', mime: block.source.media_type, name: 'PDF 文档' })
+        }
+      }
+      displayContent = textParts.join('\n')
+    } else {
+      displayContent = content
+    }
+
+    // 构建附件预览 HTML
+    let uploadsHtml = ''
+    if (uploads.length > 0 || mediaBlocks.length > 0) {
+      const items = uploads.length > 0 ? uploads.map(f => {
+        if (f.type === 'image' && f.url) {
+          return `<img src="${f.url}" class="max-h-24 rounded-xl border border-white/50 shadow-sm" alt="${escHtml(f.name)}">`
+        } else {
+          const icon = f.mimeType === 'application/pdf' ? 'file-text' : 'file'
+          return `<div class="flex items-center gap-2 bg-black/20 px-3 py-1.5 rounded-lg text-[11px]"><i data-lucide="${icon}" class="w-3.5 h-3.5"></i>${escHtml(f.name)}</div>`
+        }
+      }) : mediaBlocks.map(b => {
+        if (b.type === 'image') {
+          return `<img src="data:${b.mime};base64,${b.data}" class="max-h-24 rounded-xl border border-white/50 shadow-sm">`
+        } else {
+          return `<div class="flex items-center gap-2 bg-black/20 px-3 py-1.5 rounded-lg text-[11px]"><i data-lucide="file-text" class="w-3.5 h-3.5"></i>${escHtml(b.name || '文档')}</div>`
+        }
+      })
+      uploadsHtml = `<div class="flex flex-wrap gap-2 mt-3">${items.join('')}</div>`
+    }
+    wrap.innerHTML = `
+      <div class="max-w-[65%] bubble p-5">
+        <p class="text-sm leading-relaxed">${renderMarkdown(displayContent)}</p>
+        ${uploadsHtml}
+      </div>`
+  } else {
+    wrap.className = 'flex justify-start items-start gap-3 msg-assistant'
+
+    const assistantContainer = document.createElement('div')
+    assistantContainer.className = 'max-w-[82%]'
+    assistantContainer.innerHTML = `
+      <div class="w-8 h-8 rounded-xl bg-deep-charcoal flex items-center justify-center shrink-0 float-left mr-3">
+        <i data-lucide="bot" class="w-4 h-4 text-white"></i>
+      </div>`
+
+    if (Array.isArray(content)) {
+      // 第一遍：创建所有节点，建立 tool_use_id → DOM 节点映射
+      const toolBlockMap = {}
+      const contentContainer = document.createElement('div')
+      contentContainer.className = 'ml-11'
+
+      content.forEach(block => {
+        if (block.type === 'text' && block.text) {
+          const textDiv = document.createElement('div')
+          textDiv.className = 'bubble p-5 mb-2'
+          textDiv.innerHTML = `<p class="text-sm leading-relaxed">${renderMarkdown(block.text)}</p>`
+          contentContainer.appendChild(textDiv)
+
+        } else if (block.type === 'tool_use') {
+          const toolDiv = document.createElement('div')
+          toolDiv.className = 'tool-block bg-gray-50 border border-gray-200 mb-2 overflow-hidden'
+          toolDiv.dataset.toolId = block.id
+          toolDiv.innerHTML = `
+            <div class="tool-header flex items-center gap-2 px-3 py-2 bg-gray-100 cursor-pointer hover:bg-gray-200 transition-colors" onclick="this.nextElementSibling.classList.toggle('open');this.querySelector('.tool-chevron').classList.toggle('open')">
+              <i data-lucide="terminal" class="w-3.5 h-3.5 text-gray-500"></i>
+              <span class="text-xs font-mono text-gray-600 flex-1">${escHtml(block.name)}</span>
+              <span class="text-[10px] text-gray-400">${block.id?.slice(-8) || ''}</span>
+              <i data-lucide="chevron-down" class="w-3.5 h-3.5 text-gray-400 tool-chevron transition-transform"></i>
+            </div>
+            <div class="tool-body px-3 py-2 bg-gray-50">
+              <pre class="text-[11px] font-mono text-gray-600 overflow-x-auto">${escHtml(JSON.stringify(block.input, null, 2))}</pre>
+              <div class="tool-result mt-2 pt-2 border-t border-gray-200" data-tool-result-id="${block.id}">
+                <span class="text-[10px] text-gray-400 italic">执行中...</span>
+              </div>
+            </div>`
+          contentContainer.appendChild(toolDiv)
+          toolBlockMap[block.id] = toolDiv
+
+        } else if (block.type === 'tool_result') {
+          // 找到对应的 tool_use 块，回填结果
+          const toolDiv = toolBlockMap[block.tool_use_id]
+          if (toolDiv) {
+            const resultDiv = toolDiv.querySelector(`[data-tool-result-id="${block.tool_use_id}"]`)
+            if (resultDiv) {
+              fillToolResultContent(resultDiv, block.content)
+            }
+          }
+          // 静默忽略找不到对应块的情况
+        }
+      })
+
+      assistantContainer.appendChild(contentContainer)
+    } else {
+      // 字符串内容（兼容旧数据）
+      const textDiv = document.createElement('div')
+      textDiv.className = 'bubble p-5 ml-11'
+      textDiv.innerHTML = `<p class="text-sm leading-relaxed">${renderMarkdown(content)}</p>`
+      assistantContainer.appendChild(textDiv)
+    }
+
+    wrap.appendChild(assistantContainer)
+  }
+  list.appendChild(wrap)
+  lucide.createIcons({ nodes: [wrap] })
+}
+
+// 填充 tool result 内容到指定 DOM 节点
+function fillToolResultContent(resultDiv, content) {
+  let resultObj
+  try {
+    resultObj = JSON.parse(content)
+  } catch {
+    resultObj = { output: content, success: true }
+  }
+
+  const isSuccess = resultObj.success !== false
+  const output = resultObj.output || resultObj.content || String(content)
+
+  resultDiv.innerHTML = `
+    <div class="flex items-center gap-2 mb-1">
+      <span class="text-[10px] px-2 py-0.5 rounded-full ${isSuccess ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}">
+        ${isSuccess ? '完成' : '失败'}
+      </span>
+      ${resultObj.exit_code !== undefined ? `<span class="text-[10px] text-gray-400">exit: ${resultObj.exit_code}</span>` : ''}
+      ${resultObj.elapsed_ms ? `<span class="text-[10px] text-gray-400">${resultObj.elapsed_ms}ms</span>` : ''}
+    </div>
+    <pre class="text-[11px] font-mono text-gray-700 overflow-x-auto bg-gray-100 rounded p-2">${escHtml(output.slice(0, 2000))}${output.length > 2000 ? '\n... (truncated)' : ''}</pre>`
+}
+
+function scrollToBottom() {
+  const list = $('msg-list')
+  list.scrollTop = list.scrollHeight
+}
+
+// ─────────────────────────────────────────────
+// / 指令系统
+// ─────────────────────────────────────────────
+const COMMANDS = [
+  { cmd:'/new',     icon:'plus',        desc:'新建对话（当前工作区）' },
+  { cmd:'/ws',      icon:'folder-open', desc:'切换工作区，示例: /ws devops-lab' },
+  { cmd:'/clear',   icon:'eraser',      desc:'清空当前会话上下文（不删历史）' },
+  { cmd:'/skill',   icon:'zap',         desc:'手动注入 skill，示例: /skill nginx-reload' },
+  { cmd:'/memory',  icon:'brain',       desc:'查看本次注入的记忆内容' },
+  { cmd:'/compact', icon:'compress',    desc:'手动触发上下文压缩' },
+]
+let cmdIdx = 0
+
+// 自适应高度 textarea
+function autoResizeTextarea(el) {
+  el.style.height = 'auto'
+  const scrollH = el.scrollHeight
+  const maxH = 200
+
+  if (scrollH > maxH) {
+    el.style.height = maxH + 'px'
+    el.style.overflowY = 'auto'
+  } else {
+    el.style.height = scrollH + 'px'
+    el.style.overflowY = 'hidden'
+  }
+}
+
+function resetTextareaHeight(el) {
+  el.style.height = 'auto'
+  el.style.overflowY = 'hidden'
+}
+
+function renderCmdList(filter = '/') {
+  const list = $('cmd-list')
+  const visible = COMMANDS.filter(c => c.cmd.startsWith(filter))
+  list.innerHTML = visible.map((c, i) => `
+    <div class="cmd-item ${i===0?'selected':''} flex items-center gap-3 px-4 py-2.5" onclick="pickCmd('${c.cmd}')">
+      <span class="w-6 h-6 rounded-lg bg-oxygen-blue/10 flex items-center justify-center shrink-0">
+        <i data-lucide="${c.icon}" class="w-3 h-3 text-oxygen-blue"></i>
+      </span>
+      <div class="flex-1 min-w-0">
+        <span class="text-[12px] font-mono font-bold text-oxygen-blue">${c.cmd}</span>
+        <span class="text-[11px] opacity-40 ml-2">${c.desc}</span>
+      </div>
+    </div>`).join('')
+  lucide.createIcons({ nodes: [list] })
+  cmdIdx = 0
+}
+
+function onChatInput(input) {
+  const pal = $('cmd-palette')
+  if (input.value.startsWith('/')) {
+    renderCmdList(input.value)
+    pal.classList.add('open')
+  } else {
+    pal.classList.remove('open')
+  }
+}
+
+function onChatKey(e) {
+  const pal  = $('cmd-palette')
+  const open = pal.classList.contains('open')
+  // Shift+Enter 换行，Enter 发送
+  if (e.key === 'Enter' && !e.shiftKey && !open) { sendMessage(); e.preventDefault(); return }
+  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { sendMessage(); e.preventDefault(); return }
+  if (!open) return
+  const items = [...$('cmd-list').querySelectorAll('.cmd-item')]
+  if (e.key === 'ArrowDown') { cmdIdx = Math.min(cmdIdx+1, items.length-1); updateCmdSel(); e.preventDefault() }
+  if (e.key === 'ArrowUp')   { cmdIdx = Math.max(cmdIdx-1, 0); updateCmdSel(); e.preventDefault() }
+  if (e.key === 'Escape')    { closeCmdPalette(); return }
+  if (e.key === 'Enter') {
+    const sel = items[cmdIdx]
+    if (sel) { const m = sel.querySelector('.font-mono'); if (m) pickCmd(m.textContent) }
+    e.preventDefault()
+  }
+}
+
+function updateCmdSel() {
+  $('cmd-list').querySelectorAll('.cmd-item').forEach((el,i) => el.classList.toggle('selected', i===cmdIdx))
+}
+
+function pickCmd(cmd) {
+  $('chat-input').value = cmd + ' '
+  $('chat-input').focus()
+  closeCmdPalette()
+}
+
+function closeCmdPalette() { $('cmd-palette').classList.remove('open') }
+
+function execCommand(text) {
+  const [cmd, ...args] = text.trim().split(/\s+/)
+  switch(cmd) {
+    case '/new':    newSession(); break
+    case '/ws':     if(args[0]) { const ws = state.workspaces.find(w=>w.name===args.join(' ')); if(ws) selectWorkspace(ws) } break
+    case '/clear':  clearMessages(); state.messages=[]; state.ctxTurns=0; $('ctx-turns').textContent='上下文: 0 / 20 轮'; break
+    case '/memory': alert('记忆调试功能即将上线'); break
+    case '/compact':api('/api/chat/compact', { method:'POST', body:{ sessionId: state.currentSession?.id } }); break
+    case '/skill':  if(args[0]) api('/api/chat/skill', { method:'POST', body:{ workspaceId: state.currentWs?.id, name: args[0] } }); break
+    default: alert(`未知指令: ${cmd}`)
+  }
+}
+
+// ─────────────────────────────────────────────
+// 文件上传
+// ─────────────────────────────────────────────
+function handleDragOver(e) {
+  e.preventDefault()
+  e.dataTransfer.dropEffect = 'copy'
+  $('chat-input-area').classList.add('ring-2', 'ring-oxygen-blue', 'ring-opacity-50')
+}
+
+function handleDragLeave(e) {
+  e.preventDefault()
+  $('chat-input-area').classList.remove('ring-2', 'ring-oxygen-blue', 'ring-opacity-50')
+}
+
+async function handleDrop(e) {
+  e.preventDefault()
+  $('chat-input-area').classList.remove('ring-2', 'ring-oxygen-blue', 'ring-opacity-50')
+  const files = e.dataTransfer.files
+  if (files.length > 0) {
+    await processFiles(files)
+  }
+}
+
+async function handleFileSelect(e) {
+  const files = e.target.files
+  if (files.length > 0) {
+    await processFiles(files)
+  }
+  // 清空 input，允许重复选择相同文件
+  e.target.value = ''
+}
+
+async function processFiles(files) {
+  if (!state.currentWs) {
+    alert('请先选择工作区')
+    return
+  }
+
+  const formData = new FormData()
+  for (const file of files) {
+    formData.append('files', file)
+  }
+
+  try {
+    const res = await fetch(`/api/upload?workspaceId=${state.currentWs.id}`, {
+      method: 'POST',
+      body: formData,
+      credentials: 'include'
+    })
+    if (res.status === 401) { showLogin(); return }
+    if (!res.ok) throw new Error(`${res.status} ${await res.text()}`)
+
+    const data = await res.json()
+    if (data.success) {
+      state.uploads.push(...data.files)
+      renderUploadPreviews()
+    }
+  } catch (e) {
+    alert('上传失败: ' + e.message)
+  }
+}
+
+function renderUploadPreviews() {
+  const container = $('upload-preview')
+  if (state.uploads.length === 0) {
+    container.classList.add('hidden')
+    container.innerHTML = ''
+    return
+  }
+
+  container.classList.remove('hidden')
+  container.innerHTML = state.uploads.map((file, idx) => {
+    const isImage = file.type === 'image'
+    const icon = isImage ? 'image' : (file.mimeType === 'application/pdf' ? 'file-text' : 'file')
+    return `
+      <div class="flex items-center gap-2 bg-white/70 px-3 py-2 rounded-xl border border-white text-[11px] max-w-[200px]">
+        ${isImage && file.url ? `<img src="${file.url}" class="w-6 h-6 rounded object-cover shrink-0">` : `<i data-lucide="${icon}" class="w-4 h-4 opacity-50 shrink-0"></i>`}
+        <span class="truncate flex-1">${escHtml(file.name)}</span>
+        <button onclick="removeUpload(${idx})" class="p-1 hover:bg-slate-100 rounded transition-colors shrink-0">
+          <i data-lucide="x" class="w-3 h-3 opacity-50"></i>
+        </button>
+      </div>
+    `
+  }).join('')
+  lucide.createIcons({ nodes: [container] })
+}
+
+function removeUpload(idx) {
+  state.uploads.splice(idx, 1)
+  renderUploadPreviews()
+}
+
+// ─────────────────────────────────────────────
+// 系统状态轮询
+// ─────────────────────────────────────────────
+async function pollStatus() {
+  try {
+    const data = await api('/api/dashboard/system')
+    if (!data) return
+    setPill('pill-runner', data.runner)
+    setPill('pill-memory', data.memory)
+    setPill('pill-lark',   data.lark)
+    $('runner-detail').textContent = data.runner?.detail || '—'
+  } catch {}
+}
+
+function setPill(id, svc) {
+  const el = $(id)
+  if (!el) return
+  const dot = el.querySelector('span')
+  const colors = { ok:'bg-green-500', warn:'bg-yellow-400', error:'bg-red-400' }
+  const c = colors[svc?.status] || 'bg-slate-300'
+  if (dot) dot.className = `w-1.5 h-1.5 rounded-full ${c} inline-block`
+}
+
+function startStatusPoll() {
+  pollStatus()
+  setInterval(pollStatus, 15000)
+}
+
+// ─────────────────────────────────────────────
+// 工具函数
+// ─────────────────────────────────────────────
+function sw(id) {
+  // 关闭移动端侧边栏
+  closeMobileSidebar()
+  closeMobileChatSidebar()
+
+  document.querySelectorAll('.view-content').forEach(v => v.classList.remove('active'))
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'))
+  const v = document.getElementById('view-'+id); if(v) v.classList.add('active')
+  const n = document.getElementById('nav-'+id);  if(n) n.classList.add('active')
+  const tints = { engineering:'#131316', automation:'#F0F0F2', logs:'#F5F5F7' }
+  document.body.style.backgroundColor = tints[id] || '#F8F9FA'
+
+  // 切换到工程化视图时初始化拖拽分割线
+  if (id === 'engineering') {
+    // 延迟到视图渲染完成后执行
+    setTimeout(() => initEditorTerminalDivider(), 0)
+  }
+
+  // 保存当前视图到 localStorage
+  localStorage.setItem('lastView', id)
+}
+
+function toggleTool(header) {
+  const body = header.nextElementSibling
+  const ch   = header.querySelector('.tool-chevron')
+  body?.classList.toggle('open')
+  ch?.classList.toggle('open')
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+
+function renderMarkdown(text) {
+  // 极简 markdown: code blocks, inline code, bold, newlines
+  return escHtml(text)
+    .replace(/```([\s\S]*?)```/g, '<pre class="bg-slate-50 rounded-xl p-3 my-2 text-[11px] overflow-x-auto"><code>$1</code></pre>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\n/g, '<br>')
+}
+
+function fmtDate(ts) {
+  if (!ts) return ''
+  const d = new Date(typeof ts === 'number' ? ts : ts)
+  const now = new Date()
+  const diff = now - d
+  if (diff < 86400000) return '今天'
+  if (diff < 172800000) return '昨天'
+  return `${d.getMonth()+1}月${d.getDate()}日`
+}
+
+// ─────────────────────────────────────────────
+// 移动端侧边栏控制
+// ─────────────────────────────────────────────
+function toggleMobileSidebar() {
+  const sidebar = document.querySelector('.sidebar-nav')
+  const overlay = document.querySelector('.sidebar-overlay')
+  sidebar.classList.toggle('open')
+  overlay.classList.toggle('open')
+}
+
+function closeMobileSidebar() {
+  const sidebar = document.querySelector('.sidebar-nav')
+  const overlay = document.querySelector('.sidebar-overlay')
+  sidebar.classList.remove('open')
+  overlay.classList.remove('open')
+}
+
+function toggleMobileChatSidebar() {
+  const sidebar = document.querySelector('.chat-sidebar')
+  const overlay = document.querySelector('.chat-sidebar-overlay')
+  sidebar.classList.toggle('open')
+  overlay.style.display = sidebar.classList.contains('open') ? 'block' : 'none'
+}
+
+function closeMobileChatSidebar() {
+  const sidebar = document.querySelector('.chat-sidebar')
+  const overlay = document.querySelector('.chat-sidebar-overlay')
+  sidebar.classList.remove('open')
+  overlay.style.display = 'none'
+}
+
+// ─────────────────────────────────────────────
+// 终端功能 (T-3.2 + T-3.5 持久化)
+// ─────────────────────────────────────────────
+
+// 恢复工作区的终端会话（页面加载时调用）
+async function restoreTerminals(workspaceId) {
+  try {
+    const res = await api(`/api/terminal?workspaceId=${workspaceId}`)
+    if (!res.terminals || res.terminals.length === 0) return
+
+    console.log(`[Terminal] Restoring ${res.terminals.length} terminal(s) for workspace ${workspaceId}`)
+
+    for (const termData of res.terminals) {
+      // 跳过已关闭的终端
+      if (termData.closedAt) continue
+
+      // 检查是否已存在（避免重复）
+      if (state.terminals.find(t => t.id === termData.id)) continue
+
+      // 初始化终端（重建 WS 连接）
+      const term = await initTerminal(termData)
+      state.terminals.push(term)
+    }
+
+    // 如果有恢复的终端，选中第一个
+    if (state.terminals.length > 0 && !state.currentTerminal) {
+      state.currentTerminal = state.terminals[0].id
+    }
+
+    renderTerminalTabs()
+    updateTerminalUI()
+  } catch (err) {
+    console.error('[Terminal] Failed to restore terminals:', err)
+  }
+}
+
+async function createNewTerminal() {
+  if (!state.currentWs) {
+    alert('请先选择工作区')
+    return
+  }
+  if (state.terminals.length >= state.maxTerminals) {
+    alert(`最多只能创建 ${state.maxTerminals} 个终端`)
+    return
+  }
+
+  try {
+    const res = await api('/api/terminal', {
+      method: 'POST',
+      body: { workspaceId: state.currentWs.id }
+    })
+
+    if (res.terminal) {
+      const term = await initTerminal(res.terminal)
+      state.terminals.push(term)
+      state.currentTerminal = term.id
+      renderTerminalTabs()
+      updateTerminalUI()
+    }
+  } catch (err) {
+    console.error('Failed to create terminal:', err)
+    alert(err.message || '创建终端失败')
+  }
+}
+
+async function initTerminal(terminalData) {
+  const { id, title, cwd, pid } = terminalData
+
+  // 创建终端容器
+  const container = document.createElement('div')
+  container.id = `terminal-${id}`
+  container.className = 'absolute inset-0'
+  container.style.display = 'none'
+
+  const termDiv = document.createElement('div')
+  termDiv.className = 'w-full h-full'
+  container.appendChild(termDiv)
+
+  $('terminal-container').appendChild(container)
+
+  // 创建 xterm 实例
+  const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 13,
+    fontFamily: 'JetBrains Mono, monospace',
+    theme: {
+      background: '#1a1a1a',
+      foreground: '#e0e0e0',
+      cursor: '#7091F5',
+      selectionBackground: '#7091F550',
+      black: '#2d2d2d',
+      red: '#e06c75',
+      green: '#98c379',
+      yellow: '#e5c07b',
+      blue: '#7091F5',
+      magenta: '#c678dd',
+      cyan: '#56b6c2',
+      white: '#d0d0d0'
+    },
+    scrollback: 10000
+  })
+
+  // 添加 fit 插件
+  const fitAddon = new FitAddon.FitAddon()
+  term.loadAddon(fitAddon)
+
+  // 挂载终端
+  term.open(termDiv)
+  fitAddon.fit()
+
+  // 连接 WebSocket
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  const ws = new WebSocket(`${proto}://${location.host}/ws/terminal/${id}`)
+
+  ws.onopen = () => {
+    console.log(`[Terminal] Connected: ${id}`)
+    updateTerminalStatus('connected', pid)
+  }
+
+  ws.onmessage = (e) => {
+    term.write(e.data)
+  }
+
+  ws.onclose = () => {
+    console.log(`[Terminal] Disconnected: ${id}`)
+    term.write('\r\n\x1b[31m[连接已断开]\x1b[0m\r\n')
+    updateTerminalStatus('disconnected')
+  }
+
+  ws.onerror = (err) => {
+    console.error(`[Terminal] Error: ${id}`, err)
+  }
+
+  // 用户输入发送到后端
+  term.onData((data) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(data)
+    }
+  })
+
+  // 窗口大小变化时发送 resize 消息
+  term.onResize(({ cols, rows }) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+    }
+  })
+
+  // 监听容器大小变化
+  const resizeObserver = new ResizeObserver(() => {
+    fitAddon.fit()
+  })
+  resizeObserver.observe(container)
+
+  // 显示空状态或当前终端
+  $('terminal-empty').style.display = 'none'
+  container.style.display = 'block'
+
+  return {
+    id,
+    title,
+    cwd,
+    pid,
+    ws,
+    xterm: term,
+    fitAddon,
+    container,
+    resizeObserver
+  }
+}
+
+function switchTerminal(id) {
+  if (state.currentTerminal === id) return
+
+  // 隐藏当前终端
+  if (state.currentTerminal) {
+    const current = state.terminals.find(t => t.id === state.currentTerminal)
+    if (current) {
+      current.container.style.display = 'none'
+    }
+  }
+
+  // 显示新终端
+  const target = state.terminals.find(t => t.id === id)
+  if (target) {
+    target.container.style.display = 'block'
+    target.fitAddon.fit()
+    state.currentTerminal = id
+    updateTerminalStatus('connected', target.pid, target.cwd)
+  }
+
+  renderTerminalTabs()
+}
+
+async function closeTerminal(id) {
+  const idx = state.terminals.findIndex(t => t.id === id)
+  if (idx === -1) return
+
+  const term = state.terminals[idx]
+
+  // 关闭 WebSocket
+  if (term.ws) {
+    term.ws.close()
+  }
+
+  // 销毁 xterm
+  term.xterm.dispose()
+
+  // 停止监听大小变化
+  term.resizeObserver.disconnect()
+
+  // 移除 DOM
+  term.container.remove()
+
+  // 从数组移除
+  state.terminals.splice(idx, 1)
+
+  // 如果关闭的是当前终端，切换到其他终端
+  if (state.currentTerminal === id) {
+    state.currentTerminal = state.terminals.length > 0 ? state.terminals[0].id : null
+    if (state.currentTerminal) {
+      const next = state.terminals.find(t => t.id === state.currentTerminal)
+      next.container.style.display = 'block'
+      next.fitAddon.fit()
+      updateTerminalStatus('connected', next.pid, next.cwd)
+    } else {
+      $('terminal-empty').style.display = 'flex'
+      updateTerminalStatus('idle')
+    }
+  }
+
+  renderTerminalTabs()
+  updateTerminalUI()
+
+  // 通知后端关闭
+  try {
+    await api(`/api/terminal/${id}`, { method: 'DELETE' })
+  } catch (err) {
+    console.error('Failed to close terminal on server:', err)
+  }
+}
+
+function renderTerminalTabs() {
+  const container = $('terminal-tabs')
+  container.innerHTML = ''
+
+  state.terminals.forEach(term => {
+    const isActive = term.id === state.currentTerminal
+    const tab = document.createElement('div')
+    tab.className = `terminal-tab flex items-center gap-2 px-3 py-2 rounded-xl text-[11px] font-medium ${isActive ? 'active' : 'bg-white/40'}`
+    tab.onclick = (e) => {
+      if (e.target.closest('.close-btn')) return
+      switchTerminal(term.id)
+    }
+
+    const icon = document.createElement('i')
+    icon.setAttribute('data-lucide', 'terminal')
+    icon.className = 'w-3.5 h-3.5 opacity-60'
+
+    const title = document.createElement('span')
+    title.textContent = term.title
+    title.className = 'truncate max-w-[80px]'
+
+    const closeBtn = document.createElement('button')
+    closeBtn.className = 'close-btn ml-1 p-0.5 rounded hover:bg-slate-200/50'
+    closeBtn.innerHTML = '<i data-lucide="x" class="w-3 h-3"></i>'
+    closeBtn.onclick = () => closeTerminal(term.id)
+
+    tab.appendChild(icon)
+    tab.appendChild(title)
+    tab.appendChild(closeBtn)
+    container.appendChild(tab)
+  })
+
+  lucide.createIcons()
+}
+
+function updateTerminalUI() {
+  const btn = $('new-terminal-btn')
+  const count = $('terminal-count')
+
+  // 更新新建按钮状态
+  if (state.terminals.length >= state.maxTerminals) {
+    btn.disabled = true
+    btn.classList.add('opacity-50', 'cursor-not-allowed')
+  } else {
+    btn.disabled = false
+    btn.classList.remove('opacity-50', 'cursor-not-allowed')
+  }
+
+  // 更新计数
+  count.textContent = `${state.terminals.length} / ${state.maxTerminals}`
+}
+
+function updateTerminalStatus(status, pid, cwd) {
+  const statusEl = $('terminal-status')
+  const cwdEl = $('terminal-cwd')
+
+  if (status === 'connected') {
+    statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 dot-pulse"></span>已连接'
+    statusEl.classList.remove('opacity-50')
+    statusEl.classList.add('text-green-600')
+  } else if (status === 'disconnected') {
+    statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-red-400"></span>已断开'
+    statusEl.classList.remove('text-green-600')
+    statusEl.classList.add('text-red-500')
+  } else {
+    statusEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-slate-300"></span>未连接'
+    statusEl.classList.remove('text-green-600', 'text-red-500')
+    statusEl.classList.add('opacity-50')
+  }
+
+  if (cwd) {
+    cwdEl.textContent = cwd
+    cwdEl.title = cwd
+  } else {
+    cwdEl.textContent = '—'
+  }
+}
+
+// ─────────────────────────────────────────────
+// 编辑器-终端拖拽分割线
+// ─────────────────────────────────────────────
+
+function initEditorTerminalDivider() {
+  const divider = document.getElementById('editor-terminal-divider')
+  const editorPanel = document.getElementById('editor-panel')
+  const terminalPanel = document.getElementById('terminal-panel')
+  const container = document.getElementById('editor-terminal-container')
+
+  if (!divider || !editorPanel || !terminalPanel || !container) return
+
+  // 先把初始值设为 px（必须在容器已渲染后调用）
+  const containerRect = container.getBoundingClientRect()
+  if (containerRect.height > 0) {
+    const dividerHeight = 6
+    const totalH = containerRect.height - dividerHeight
+    editorPanel.style.flexBasis = Math.floor(totalH * 0.65) + 'px'
+    terminalPanel.style.flexBasis = Math.floor(totalH * 0.35) + 'px'
+  }
+
+  let isDragging = false
+
+  divider.addEventListener('mousedown', (e) => {
+    isDragging = true
+    divider.classList.add('dragging')
+    e.preventDefault()
+
+    // 添加全屏透明遮罩，防止编辑器/终端拦截鼠标事件
+    const overlay = document.createElement('div')
+    overlay.id = 'drag-overlay'
+    overlay.style.cssText = `
+      position: fixed; inset: 0; z-index: 9999;
+      cursor: row-resize;
+    `
+    document.body.appendChild(overlay)
+  })
+
+  document.addEventListener('mousemove', (e) => {
+    if (!isDragging) return
+
+    const rect = container.getBoundingClientRect()
+    const dividerHeight = 6  // 分割线高度
+    const totalHeight = rect.height - dividerHeight
+
+    // 计算像素值
+    let editorHeight = e.clientY - rect.top
+
+    // 限制最小高度 120px
+    editorHeight = Math.min(
+      Math.max(editorHeight, 120),
+      totalHeight - 120
+    )
+    const terminalHeight = totalHeight - editorHeight
+
+    // 改用 px 而不是 %
+    editorPanel.style.flexBasis = editorHeight + 'px'
+    terminalPanel.style.flexBasis = terminalHeight + 'px'
+
+    // 通知 Monaco 重新计算尺寸
+    if (state.editor) {
+      state.editor.layout()
+    }
+
+    // 通知 xterm 重新计算尺寸
+    state.terminals.forEach(term => {
+      if (term.fitAddon) {
+        term.fitAddon.fit()
+      }
+    })
+  })
+
+  document.addEventListener('mouseup', () => {
+    if (!isDragging) return
+    isDragging = false
+    divider.classList.remove('dragging')
+
+    // 移除遮罩
+    document.getElementById('drag-overlay')?.remove()
+
+    // 拖拽结束后重新触发 Monaco layout 和 xterm fit
+    if (state.editor) {
+      state.editor.layout()
+    }
+    state.terminals.forEach(term => {
+      if (term.fitAddon) {
+        term.fitAddon.fit()
+      }
+    })
+  })
+}
+
+// ─────────────────────────────────────────────
+// 文件编辑器 (Monaco Editor)
+// ─────────────────────────────────────────────
+
+// 初始化 Monaco Editor
+function initMonacoEditor() {
+  if (state.editor) return;
+  if (typeof window.require === 'undefined') {
+    console.error('Monaco Editor loader not available');
+    return;
+  }
+
+  window.require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs' } });
+  window.require(['vs/editor/editor.main'], function () {
+    const editorContainer = $('monaco-editor');
+    if (!editorContainer) return;
+
+    state.editor = window.monaco.editor.create(editorContainer, {
+      value: '',
+      language: 'plaintext',
+      theme: 'vs-light',
+      automaticLayout: true,
+      minimap: { enabled: false },
+      scrollBeyondLastLine: false,
+      fontSize: 14,
+      fontFamily: 'JetBrains Mono, monospace',
+      lineNumbers: 'on',
+      roundedSelection: false,
+      scrollbar: {
+        useShadows: false,
+        verticalHasArrows: false,
+        horizontalHasArrows: false,
+        vertical: 'auto',
+        horizontal: 'auto'
+      },
+      padding: { top: 16, bottom: 16 }
+    });
+
+    // 监听内容变化，标记修改状态
+    state.editor.onDidChangeModelContent(() => {
+      const file = state.editorFiles.find(f => f.id === state.currentEditorFile);
+      if (file) {
+        file.isModified = state.editor.getValue() !== file.originalContent;
+        renderEditorTabs();
+        updateEditorStatus();
+        updateEditorToolbar();
+      }
+    });
+
+    // 绑定保存快捷键
+    state.editor.addCommand(window.monaco.KeyMod.CtrlCmd | window.monaco.KeyCode.KeyS, () => {
+      saveCurrentFile();
+    });
+  });
+}
+
+// 加载指定目录的子项（惰性加载）
+async function loadTreeNode(path = '.') {
+  if (!state.currentWs) return null;
+
+  try {
+    const data = await api(`/api/files?workspaceId=${state.currentWs.id}&path=${encodeURIComponent(path)}`);
+    if (!data || !data.success) return null;
+
+    // 创建或更新节点
+    const node = {
+      path: path,
+      name: path === '.' ? state.currentWs.name : path.split('/').pop(),
+      type: 'directory',
+      children: data.files.map(f => f.path),
+      loaded: true,
+      expanded: state.expandedPaths.has(path)
+    };
+
+    // 更新当前目录节点
+    state.treeNodes.set(path, node);
+
+    // 添加/更新子节点
+    for (const file of data.files) {
+      const existing = state.treeNodes.get(file.path);
+      state.treeNodes.set(file.path, {
+        path: file.path,
+        name: file.name,
+        type: file.isDirectory ? 'directory' : 'file',
+        language: file.language,
+        children: existing?.children || [],
+        loaded: existing?.loaded || false,
+        expanded: state.expandedPaths.has(file.path)
+      });
+    }
+
+    return node;
+  } catch (err) {
+    console.error('Failed to load tree node:', err);
+    return null;
+  }
+}
+
+// 初始化加载根目录
+async function loadFileTree() {
+  if (!state.currentWs) return;
+  await loadTreeNode('.');
+  renderFileTree();
+}
+
+// 切换目录展开/折叠状态
+async function toggleFolder(path) {
+  const node = state.treeNodes.get(path);
+  if (!node || node.type !== 'directory') return;
+
+  if (node.expanded) {
+    // 折叠
+    node.expanded = false;
+    state.expandedPaths.delete(path);
+  } else {
+    // 展开：如果未加载子项，先加载
+    if (!node.loaded) {
+      await loadTreeNode(path);
+    }
+    node.expanded = true;
+    state.expandedPaths.add(path);
+  }
+
+  renderFileTree();
+}
+
+// 刷新文件树（清空缓存重新加载）
+async function refreshFileTree() {
+  state.treeNodes.clear();
+  state.expandedPaths = new Set(['.']);
+  await loadFileTree();
+}
+
+// 渲染文件树（VSCode 树形模式）
+function renderFileTree() {
+  const container = $('file-tree');
+  if (!container) return;
+
+  const rootNode = state.treeNodes.get('.');
+  if (!rootNode) {
+    container.innerHTML = '<p class="text-[10px] font-mono opacity-30 text-center py-4">选择工作区加载文件</p>';
+    return;
+  }
+
+  // 添加拖拽相关样式和事件
+  container.style.userSelect = 'none';
+  container.setAttribute('ondragover', 'handleRootDragOver(event)');
+  container.setAttribute('ondragleave', 'handleRootDragLeave(event)');
+  container.setAttribute('ondrop', 'handleRootDrop(event)');
+
+  container.innerHTML = renderTreeNode('.', 0);
+  lucide.createIcons({ nodes: [container] });
+}
+
+// 递归渲染单个树节点及其子项
+function renderTreeNode(path, depth) {
+  const node = state.treeNodes.get(path);
+  if (!node) return '';
+
+  const isDir = node.type === 'directory';
+  const isExpanded = node.expanded;
+  const isSelected = state.selectedTreePath === path;
+
+  // 展开/折叠箭头图标
+  const arrowIcon = isDir
+    ? (isExpanded ? 'chevron-down' : 'chevron-right')
+    : '';
+  const arrowClass = isDir ? 'cursor-pointer hover:opacity-70' : 'opacity-0 pointer-events-none';
+
+  // 文件/目录图标
+  const fileIcon = isDir
+    ? (isExpanded ? 'folder-open' : 'folder')
+    : (node.language ? getFileIcon(node.name) : 'file');
+  const iconColor = isDir ? 'text-amber-400' : 'opacity-50';
+
+  // 缩进计算
+  const indentPx = depth * 12;
+
+  // 渲染当前节点
+  const dragAttrs = `draggable="true" ondragstart="handleDragStart(event, '${path}')" ondragend="handleDragEnd(event)"`;
+  const dropAttrs = isDir
+    ? `ondragover="handleDragOver(event, '${path}')" ondragleave="handleDragLeave(event, '${path}')" ondrop="handleDrop(event, '${path}')"`
+    : '';
+
+  let html = `
+    <div class="tree-node-wrapper" ${dropAttrs}>
+      <div class="tree-node group flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/50 cursor-pointer transition-colors ${isSelected ? 'bg-white/70' : ''}"
+           style="padding-left: ${8 + indentPx}px"
+           data-path="${path}"
+           ${dragAttrs}
+           onclick="onTreeNodeClick(event, '${path}', ${isDir})">
+        <span class="tree-arrow w-4 h-4 flex items-center justify-center ${arrowClass}"
+              onclick="event.stopPropagation(); toggleFolder('${path}')">
+          <i data-lucide="${arrowIcon}" class="w-3 h-3 opacity-50"></i>
+        </span>
+        <i data-lucide="${fileIcon}" class="w-4 h-4 ${iconColor}"></i>
+        <span class="text-[11px] truncate flex-1 tree-name">${node.name}</span>
+        <button class="tree-menu-btn opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-white/70 transition-all"
+                onclick="event.stopPropagation(); showTreeMenu(event, '${path}', ${isDir})">
+          <i data-lucide="more-horizontal" class="w-3 h-3 opacity-50"></i>
+        </button>
+      </div>
+  `;
+
+  // 如果是展开的目录，递归渲染子项
+  if (isDir && isExpanded && node.children) {
+    // 按目录在前、文件在后排序
+    const sortedChildren = node.children
+      .map(childPath => state.treeNodes.get(childPath))
+      .filter(Boolean)
+      .sort((a, b) => {
+        if (a.type !== b.type) {
+          return a.type === 'directory' ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+    for (const child of sortedChildren) {
+      html += renderTreeNode(child.path, depth + 1);
+    }
+  }
+
+  html += '</div>';
+  return html;
+}
+
+// 树节点点击处理
+function onTreeNodeClick(event, path, isDir) {
+  if (isDir) {
+    // 点击目录：切换展开/折叠
+    toggleFolder(path);
+  } else {
+    // 点击文件：选中并打开
+    state.selectedTreePath = path;
+    renderFileTree(); // 重新渲染以更新选中状态
+    openFile(path);
+  }
+}
+
+// 显示文件菜单
+function showFileMenu(event, path, isDirectory, index) {
+  event.stopPropagation();
+
+  // 移除已有的菜单
+  document.querySelectorAll('.file-context-menu').forEach(m => m.remove());
+
+  const menu = document.createElement('div');
+  menu.className = 'file-context-menu absolute bg-white/95 backdrop-blur-xl border border-white/80 rounded-xl shadow-xl py-1 z-50 min-w-[100px]';
+  menu.style.cssText = `
+    position: fixed;
+    z-index: 1000;
+    background: rgba(255,255,255,0.98);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.9);
+    box-shadow: 0 10px 40px -10px rgba(0,0,0,0.15);
+    border-radius: 0.75rem;
+    padding: 0.25rem 0;
+    min-width: 120px;
+  `;
+
+  const rect = event.target.getBoundingClientRect();
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + 4) + 'px';
+
+  menu.innerHTML = `
+    <div class="px-3 py-2 text-[11px] hover:bg-slate-50 cursor-pointer flex items-center gap-2 transition-colors"
+         onclick="startRenameTreeNode('${path}'); hideTreeMenu()">
+      <i data-lucide="pencil" class="w-3 h-3 opacity-50"></i>
+      <span>重命名</span>
+    </div>
+    <div class="px-3 py-2 text-[11px] hover:bg-red-50 text-red-500 cursor-pointer flex items-center gap-2 transition-colors"
+         onclick="confirmDeleteTreeNode('${path}', ${isDirectory}); hideTreeMenu()">
+      <i data-lucide="trash-2" class="w-3 h-3"></i>
+      <span>删除</span>
+    </div>
+  `;
+
+  document.body.appendChild(menu);
+  lucide.createIcons({ nodes: [menu] });
+
+  // 点击其他地方关闭菜单
+  setTimeout(() => {
+    document.addEventListener('click', hideTreeMenu, { once: true });
+  }, 10);
+}
+
+function hideTreeMenu() {
+  document.querySelectorAll('.file-context-menu').forEach(m => m.remove());
+}
+
+// 显示树节点完整菜单
+function showTreeMenu(event, path, isDirectory) {
+  event.stopPropagation();
+  hideTreeMenu();
+
+  const node = state.treeNodes.get(path);
+  if (!node) return;
+
+  const menu = document.createElement('div');
+  menu.id = 'tree-context-menu';
+  menu.className = 'file-context-menu';
+  menu.style.cssText = `
+    position: fixed;
+    z-index: 1000;
+    background: rgba(255,255,255,0.98);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(0,0,0,0.08);
+    box-shadow: 0 10px 40px -10px rgba(0,0,0,0.2);
+    border-radius: 0.75rem;
+    padding: 0.25rem 0;
+    min-width: 160px;
+    max-height: 400px;
+    overflow-y: auto;
+  `;
+
+  // 计算菜单位置 - 使用 clientX/Y 更可靠
+  const isMouseEvent = event.clientX !== undefined;
+  let left = isMouseEvent ? event.clientX : (event.target?.getBoundingClientRect()?.left || 0);
+  let top = isMouseEvent ? event.clientY + 4 : (event.target?.getBoundingClientRect()?.bottom + 4 || 0);
+
+  // 确保菜单不超出视口
+  if (left + 180 > window.innerWidth) left = Math.max(10, left - 180);
+  if (top + 300 > window.innerHeight) top = Math.max(10, top - 300);
+
+  menu.style.left = left + 'px';
+  menu.style.top = top + 'px';
+
+  // 全局 action 注册表
+  window._menuActions = {};
+  let actionId = 0;
+  function registerAction(fn) {
+    const id = 'action_' + (actionId++);
+    window._menuActions[id] = fn;
+    return id;
+  }
+
+  const hasClipboard = state.clipboard && state.clipboard.path;
+  const canPaste = hasClipboard && state.clipboard.path !== path;
+
+  // 生成菜单项
+  const menuItems = [];
+
+  // 基础操作组
+  menuItems.push(
+    { icon: 'copy', label: '复制路径', actionId: registerAction(() => { copyPath(path); hideTreeMenu(); }) },
+    { icon: 'file-code', label: '复制绝对路径', actionId: registerAction(() => { copyAbsolutePath(path); hideTreeMenu(); }) },
+    { separator: true },
+    { icon: 'pencil', label: '重命名', actionId: registerAction(() => { startRenameTreeNode(path); hideTreeMenu(); }) }
+  );
+
+  if (isDirectory) {
+    menuItems.push(
+      { icon: 'copy', label: '复制文件夹', actionId: registerAction(() => { copyNode(path, true); hideTreeMenu(); }) },
+      { icon: 'scissors', label: '剪切', actionId: registerAction(() => { cutNode(path, true); hideTreeMenu(); }) }
+    );
+  } else {
+    menuItems.push(
+      { icon: 'copy', label: '复制文件', actionId: registerAction(() => { copyNode(path, false); hideTreeMenu(); }) },
+      { icon: 'scissors', label: '剪切', actionId: registerAction(() => { cutNode(path, false); hideTreeMenu(); }) }
+    );
+  }
+
+  // 粘贴选项（仅目录或有剪贴板内容时显示）
+  if (canPaste) {
+    menuItems.push(
+      { icon: 'clipboard', label: '粘贴', actionId: registerAction(() => { pasteNode(path); hideTreeMenu(); }) }
+    );
+  }
+
+  menuItems.push(
+    { icon: 'trash-2', label: '删除', danger: true, actionId: registerAction(() => { confirmDeleteTreeNode(path, isDirectory); hideTreeMenu(); }) }
+  );
+
+  // 目录特有操作
+  if (isDirectory) {
+    menuItems.push({ separator: true });
+    menuItems.push(
+      { icon: 'file-plus', label: '新建文件', actionId: registerAction(() => { showInlineNewFileInput(path); hideTreeMenu(); }) },
+      { icon: 'folder-plus', label: '新建文件夹', actionId: registerAction(() => { showInlineNewFolderInput(path); hideTreeMenu(); }) }
+    );
+  }
+
+  // 终端操作
+  menuItems.push({ separator: true });
+  const dirPath = isDirectory ? path : (path.includes('/') ? path.substring(0, path.lastIndexOf('/')) : '.');
+  menuItems.push(
+    { icon: 'terminal', label: '在终端中打开', actionId: registerAction(() => { openInTerminal(dirPath); hideTreeMenu(); }) }
+  );
+
+  // 渲染菜单 - 使用 actionId 而非 toString()
+  menu.innerHTML = menuItems.map(item => {
+    if (item.separator) {
+      return '<div class="h-px bg-slate-200 my-1 mx-2"></div>';
+    }
+    const dangerClass = item.danger ? 'text-red-500 hover:bg-red-50' : 'hover:bg-slate-50';
+    return `
+      <div class="px-3 py-2 text-[11px] cursor-pointer flex items-center gap-2 transition-colors ${dangerClass}"
+           onclick="window._menuActions['${item.actionId}'] && window._menuActions['${item.actionId}']()">
+        <i data-lucide="${item.icon}" class="w-3.5 h-3.5 opacity-60"></i>
+        <span>${item.label}</span>
+      </div>
+    `;
+  }).join('');
+
+  document.body.appendChild(menu);
+  lucide.createIcons({ nodes: [menu] });
+
+  // 点击其他地方关闭菜单
+  setTimeout(() => {
+    document.addEventListener('click', hideTreeMenu, { once: true });
+  }, 10);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 剪贴板操作
+// ═══════════════════════════════════════════════════════════════
+
+// 复制路径
+async function copyPath(path) {
+  await navigator.clipboard.writeText(path);
+  showToast('已复制路径');
+}
+
+// 复制绝对路径
+async function copyAbsolutePath(path) {
+  if (!state.currentWs) return;
+  const ws = state.currentWs;
+  const absPath = ws.root_path + '/' + path;
+  await navigator.clipboard.writeText(absPath);
+  showToast('已复制绝对路径');
+}
+
+// 复制节点
+async function copyNode(path, isDirectory) {
+  state.clipboard = { type: 'copy', path, isDirectory };
+  showToast(isDirectory ? '已复制文件夹' : '已复制文件');
+}
+
+// 剪切节点
+function cutNode(path, isDirectory) {
+  state.clipboard = { type: 'cut', path, isDirectory };
+  // 设置视觉反馈
+  const node = document.querySelector(`.tree-node[data-path="${path}"]`);
+  if (node) node.style.opacity = '0.5';
+  showToast(isDirectory ? '已剪切文件夹' : '已剪切文件');
+}
+
+// 粘贴节点
+async function pasteNode(targetPath) {
+  if (!state.clipboard || !state.currentWs) return;
+
+  const { type, path: srcPath, isDirectory } = state.clipboard;
+  const fileName = srcPath.split('/').pop();
+  const dstPath = targetPath === '.' ? fileName : `${targetPath}/${fileName}`;
+
+  // 检查是否在相同位置
+  const srcDir = srcPath.includes('/') ? srcPath.substring(0, srcPath.lastIndexOf('/')) : '.';
+  if (srcDir === targetPath && type === 'cut') {
+    showToast('已在该目录中');
+    return;
+  }
+
+  try {
+    if (type === 'copy') {
+      // 生成不重复的目标路径
+      const finalDstPath = await generateUniquePath(dstPath);
+      const data = await api('/api/files/copy', {
+        method: 'POST',
+        body: {
+          workspaceId: state.currentWs.id,
+          srcPath,
+          dstPath: finalDstPath
+        }
+      });
+
+      if (data?.success) {
+        showToast('已粘贴');
+        await refreshTreeNode(targetPath);
+        // 展开目标目录
+        const targetNode = state.treeNodes.get(targetPath);
+        if (targetNode) {
+          targetNode.expanded = true;
+          state.expandedPaths.add(targetPath);
+        }
+        renderFileTree();
+      } else {
+        alert('粘贴失败: ' + (data?.error || '未知错误'));
+      }
+    } else if (type === 'cut') {
+      // 移动操作
+      await performMove(srcPath, targetPath);
+      // 清除剪贴板
+      clearClipboard();
+    }
+  } catch (err) {
+    console.error('Paste failed:', err);
+    alert('粘贴失败: ' + err.message);
+  }
+}
+
+// 生成不重复的路径
+async function generateUniquePath(basePath) {
+  const node = state.treeNodes.get(basePath);
+  if (!node) return basePath;
+
+  // 提取文件名和扩展名
+  const name = basePath.split('/').pop();
+  const lastDot = name.lastIndexOf('.');
+  const baseName = lastDot > 0 ? name.substring(0, lastDot) : name;
+  const ext = lastDot > 0 ? name.substring(lastDot) : '';
+  const dir = basePath.substring(0, basePath.length - name.length);
+
+  let counter = 1;
+  let newPath = basePath;
+  while (state.treeNodes.has(newPath)) {
+    counter++;
+    newPath = dir + baseName + '_copy' + (counter > 2 ? counter - 1 : '') + ext;
+  }
+  return newPath;
+}
+
+// 清除剪贴板
+function clearClipboard() {
+  if (state.clipboard?.path) {
+    const node = document.querySelector(`.tree-node[data-path="${state.clipboard.path}"]`);
+    if (node) node.style.opacity = '';
+  }
+  state.clipboard = null;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 内联新建输入框
+// ═══════════════════════════════════════════════════════════════
+
+// 在节点下方显示新建文件输入框
+function showInlineNewFileInput(parentPath) {
+  const wrapper = document.querySelector(`.tree-node[data-path="${parentPath}"]`)?.closest('.tree-node-wrapper');
+  if (!wrapper) return;
+
+  // 展开父目录
+  const node = state.treeNodes.get(parentPath);
+  if (node && !node.expanded) {
+    toggleFolder(parentPath);
+  }
+
+  // 创建输入框
+  const inputContainer = document.createElement('div');
+  inputContainer.className = 'inline-new-file-input py-1';
+  inputContainer.style.paddingLeft = (parseInt(wrapper.querySelector('.tree-node').style.paddingLeft || '8px') + 12) + 'px';
+  inputContainer.innerHTML = `
+    <input type="text" placeholder="文件名..."
+           class="px-2 py-1 text-[11px] bg-white rounded border border-slate-200 outline-none focus:border-oxygen-blue/50 w-32"
+           onkeydown="handleInlineNewFileKey(event, '${parentPath}')"
+           onblur="removeInlineNewFileInput()">
+  `;
+
+  wrapper.appendChild(inputContainer);
+  const input = inputContainer.querySelector('input');
+  input.focus();
+}
+
+function removeInlineNewFileInput() {
+  setTimeout(() => {
+    document.querySelectorAll('.inline-new-file-input').forEach(el => el.remove());
+  }, 200);
+}
+
+function handleInlineNewFileKey(event, parentPath) {
+  if (event.key === 'Enter') {
+    const name = event.target.value.trim();
+    if (name) {
+      createNewFile(name, parentPath);
+    }
+    removeInlineNewFileInput();
+  } else if (event.key === 'Escape') {
+    removeInlineNewFileInput();
+  }
+}
+
+// 在节点下方显示新建文件夹输入框
+function showInlineNewFolderInput(parentPath) {
+  const wrapper = document.querySelector(`.tree-node[data-path="${parentPath}"]`)?.closest('.tree-node-wrapper');
+  if (!wrapper) return;
+
+  // 展开父目录
+  const node = state.treeNodes.get(parentPath);
+  if (node && !node.expanded) {
+    toggleFolder(parentPath);
+  }
+
+  // 创建输入框
+  const inputContainer = document.createElement('div');
+  inputContainer.className = 'inline-new-folder-input py-1';
+  inputContainer.style.paddingLeft = (parseInt(wrapper.querySelector('.tree-node').style.paddingLeft || '8px') + 12) + 'px';
+  inputContainer.innerHTML = `
+    <input type="text" placeholder="文件夹名..."
+           class="px-2 py-1 text-[11px] bg-white rounded border border-slate-200 outline-none focus:border-oxygen-blue/50 w-32"
+           onkeydown="handleInlineNewFolderKey(event, '${parentPath}')"
+           onblur="removeInlineNewFolderInput()">
+  `;
+
+  wrapper.appendChild(inputContainer);
+  const input = inputContainer.querySelector('input');
+  input.focus();
+}
+
+function removeInlineNewFolderInput() {
+  setTimeout(() => {
+    document.querySelectorAll('.inline-new-folder-input').forEach(el => el.remove());
+  }, 200);
+}
+
+function handleInlineNewFolderKey(event, parentPath) {
+  if (event.key === 'Enter') {
+    const name = event.target.value.trim();
+    if (name) {
+      createNewFolder(name, parentPath);
+    }
+    removeInlineNewFolderInput();
+  } else if (event.key === 'Escape') {
+    removeInlineNewFolderInput();
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 终端操作
+// ═══════════════════════════════════════════════════════════════
+
+// 在终端中打开
+async function openInTerminal(dirPath) {
+  if (!state.currentWs) return;
+
+  // 获取工作区根路径
+  const ws = state.currentWs;
+  const fullPath = dirPath === '.' ? ws.root_path : `${ws.root_path}/${dirPath}`;
+
+  // 如果没有终端，创建一个
+  if (state.terminals.length === 0) {
+    await createNewTerminal();
+  }
+
+  // 获取当前终端
+  const terminal = state.terminals.find(t => t.id === state.currentTerminal) || state.terminals[0];
+  if (!terminal) return;
+
+  // 切换到终端面板
+  switchView('engineering');
+
+  // 等待终端 ready 后发送 cd 命令
+  setTimeout(() => {
+    if (terminal.ws && terminal.ws.readyState === WebSocket.OPEN) {
+      terminal.ws.send(`cd "${fullPath}"\n`);
+    }
+  }, 500);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Toast 通知
+// ═══════════════════════════════════════════════════════════════
+
+function showToast(message) {
+  // 移除已有 toast
+  document.querySelectorAll('.tree-toast').forEach(t => t.remove());
+
+  const toast = document.createElement('div');
+  toast.className = 'tree-toast fixed top-4 right-4 px-4 py-2 bg-slate-800 text-white text-[11px] rounded-lg shadow-lg z-50 flex items-center gap-2';
+  toast.innerHTML = `
+    <i data-lucide="check-circle" class="w-4 h-4 text-green-400"></i>
+    <span>${message}</span>
+  `;
+
+  document.body.appendChild(toast);
+  lucide.createIcons({ nodes: [toast] });
+
+  // 1.5秒后消失
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transition = 'opacity 0.3s';
+    setTimeout(() => toast.remove(), 300);
+  }, 1500);
+}
+
+// 添加右键菜单支持
+document.addEventListener('DOMContentLoaded', () => {
+  const fileTree = document.getElementById('file-tree');
+  if (fileTree) {
+    fileTree.addEventListener('contextmenu', (e) => {
+      const nodeEl = e.target.closest('.tree-node');
+      if (nodeEl) {
+        e.preventDefault();
+        const path = nodeEl.dataset.path;
+        const node = state.treeNodes.get(path);
+        if (node) {
+          showTreeMenu(e, path, node.type === 'directory');
+        }
+      }
+    });
+  }
+});
+
+// 新建文件输入框
+function showNewFileInput(targetPath = '.') {
+  state.newFileTargetPath = targetPath;
+  const container = $('new-file-input-container');
+  const input = $('new-file-input');
+  container.classList.remove('hidden');
+  input.value = '';
+  input.focus();
+}
+
+function hideNewFileInput() {
+  setTimeout(() => {
+    $('new-file-input-container')?.classList.add('hidden');
+    state.newFileTargetPath = '.';
+  }, 200);
+}
+
+function handleNewFileKey(event) {
+  if (event.key === 'Enter') {
+    const name = event.target.value.trim();
+    if (name) {
+      createNewFile(name, state.newFileTargetPath || '.');
+    }
+    hideNewFileInput();
+  } else if (event.key === 'Escape') {
+    hideNewFileInput();
+  }
+}
+
+// 新建目录输入框
+function showNewFolderInput(targetPath = '.') {
+  state.newFolderTargetPath = targetPath;
+  const container = $('new-folder-input-container');
+  const input = $('new-folder-input');
+  container.classList.remove('hidden');
+  input.value = '';
+  input.focus();
+}
+
+function hideNewFolderInput() {
+  setTimeout(() => {
+    $('new-folder-input-container')?.classList.add('hidden');
+    state.newFolderTargetPath = '.';
+  }, 200);
+}
+
+function handleNewFolderKey(event) {
+  if (event.key === 'Enter') {
+    const name = event.target.value.trim();
+    if (name) {
+      createNewFolder(name, state.newFolderTargetPath || '.');
+    }
+    hideNewFolderInput();
+  } else if (event.key === 'Escape') {
+    hideNewFolderInput();
+  }
+}
+
+// 创建新文件（在指定目录下）
+async function createNewFile(name, parentPath = '.') {
+  if (!state.currentWs) return;
+
+  const path = parentPath === '.' ? name : `${parentPath}/${name}`;
+
+  try {
+    const data = await api('/api/files', {
+      method: 'POST',
+      body: { workspaceId: state.currentWs.id, path, content: '' }
+    });
+
+    if (data?.success) {
+      // 刷新父目录
+      await refreshTreeNode(parentPath);
+      // 自动打开新文件
+      openFile(path);
+    } else {
+      alert('创建失败: ' + (data?.error || '未知错误'));
+    }
+  } catch (err) {
+    console.error('Failed to create file:', err);
+    alert('创建失败: ' + err.message);
+  }
+}
+
+// 创建新目录（在指定目录下）
+async function createNewFolder(name, parentPath = '.') {
+  if (!state.currentWs) return;
+
+  const path = parentPath === '.' ? name : `${parentPath}/${name}`;
+
+  try {
+    const data = await api('/api/files/dir', {
+      method: 'POST',
+      body: { workspaceId: state.currentWs.id, path }
+    });
+
+    if (data?.success) {
+      // 展开父目录并刷新
+      const parentNode = state.treeNodes.get(parentPath);
+      if (parentNode) {
+        parentNode.expanded = true;
+        state.expandedPaths.add(parentPath);
+      }
+      await refreshTreeNode(parentPath);
+    } else {
+      alert('创建失败: ' + (data?.error || '未知错误'));
+    }
+  } catch (err) {
+    console.error('Failed to create folder:', err);
+    alert('创建失败: ' + err.message);
+  }
+}
+
+// 刷新指定节点的子项
+async function refreshTreeNode(path) {
+  const node = state.treeNodes.get(path);
+  if (node) {
+    node.loaded = false;
+  }
+  await loadTreeNode(path);
+  renderFileTree();
+}
+
+// 开始重命名树节点
+function startRenameTreeNode(path) {
+  const node = state.treeNodes.get(path);
+  if (!node) return;
+
+  const treeItem = document.querySelector(`.tree-node[data-path="${path}"]`);
+  if (!treeItem) return;
+
+  const nameSpan = treeItem.querySelector('.tree-name');
+  if (!nameSpan) return;
+
+  const oldName = node.name;
+
+  // 创建输入框
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = oldName;
+  input.className = 'px-1 py-0.5 text-[11px] bg-white rounded border border-oxygen-blue/50 outline-none flex-1';
+
+  nameSpan.replaceWith(input);
+  input.focus();
+  input.select();
+
+  const handleRename = async () => {
+    const newName = input.value.trim();
+    if (newName && newName !== oldName) {
+      const parentPath = path.substring(0, path.length - oldName.length - 1) || '.';
+      const newPath = parentPath === '.' ? newName : `${parentPath}/${newName}`;
+      await renameTreeNode(path, newPath);
+    }
+    renderFileTree();
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      handleRename();
+    } else if (e.key === 'Escape') {
+      renderFileTree();
+    }
+  });
+
+  input.addEventListener('blur', handleRename);
+}
+
+// 重命名树节点
+async function renameTreeNode(oldPath, newPath) {
+  if (!state.currentWs) return;
+
+  // 检查新名称是否与旧名称相同
+  if (oldPath === newPath) return;
+
+  // 检查新名称是否已存在
+  if (state.treeNodes.has(newPath)) {
+    alert('该名称已存在');
+    return;
+  }
+
+  try {
+    const data = await api('/api/files/rename', {
+      method: 'PATCH',
+      body: { workspaceId: state.currentWs.id, oldPath, newPath }
+    });
+
+    if (data?.success) {
+      // 更新编辑器中的文件路径
+      const openFile = state.editorFiles.find(f => f.path === oldPath);
+      if (openFile) {
+        openFile.path = newPath;
+        updateEditorToolbar();
+        renderEditorTabs();
+      }
+      // 刷新整个树
+      await refreshFileTree();
+    } else if (data?.error?.includes('already exists') || data?.code === 409) {
+      alert('该名称已存在');
+      renderFileTree();
+    } else {
+      alert('重命名失败: ' + (data?.error || '未知错误'));
+      renderFileTree();
+    }
+  } catch (err) {
+    console.error('Failed to rename:', err);
+    alert('重命名失败: ' + err.message);
+    renderFileTree();
+  }
+}
+
+// 确认删除树节点
+function confirmDeleteTreeNode(path, isDirectory) {
+  const node = state.treeNodes.get(path);
+  const name = node?.name || path;
+  const type = isDirectory ? '目录' : '文件';
+  const warning = isDirectory ? '\n\n⚠️ 将删除该目录及其所有内容，此操作不可撤销。' : '\n\n此操作不可撤销。';
+
+  if (confirm(`确认删除${type} "${name}"？${warning}`)) {
+    deleteTreeNode(path);
+  }
+}
+
+// 删除树节点
+async function deleteTreeNode(path) {
+  if (!state.currentWs) return;
+
+  try {
+    const data = await api(`/api/files?workspaceId=${state.currentWs.id}&path=${encodeURIComponent(path)}`, {
+      method: 'DELETE'
+    });
+
+    if (data?.success) {
+      // 如果删除的是已打开的文件，关闭编辑器
+      const openFileIndex = state.editorFiles.findIndex(f => f.path === path);
+      if (openFileIndex !== -1) {
+        closeFile(state.editorFiles[openFileIndex].id);
+      }
+      // 从树中移除该节点及其所有子节点
+      removeTreeNodeAndChildren(path);
+      renderFileTree();
+    } else {
+      alert('删除失败: ' + (data?.error || '未知错误'));
+    }
+  } catch (err) {
+    console.error('Failed to delete:', err);
+    alert('删除失败: ' + err.message);
+  }
+}
+
+// 从树中移除节点及其所有子节点
+function removeTreeNodeAndChildren(path) {
+  const node = state.treeNodes.get(path);
+  if (node && node.children) {
+    for (const childPath of node.children) {
+      removeTreeNodeAndChildren(childPath);
+    }
+  }
+  state.treeNodes.delete(path);
+  state.expandedPaths.delete(path);
+}
+
+// 旧函数兼容（保留但内部调用新函数）
+async function createNewFileOld(name) { await createNewFile(name, '.'); }
+async function createNewFolderOld(name) { await createNewFolder(name, '.'); }
+
+// ═══════════════════════════════════════════════════════════════
+// 拖拽移动功能
+// ═══════════════════════════════════════════════════════════════
+
+let dragSource = null;        // 正在拖拽的路径
+let dragOverTimer = null;     // 自动展开定时器
+let dragOverTarget = null;    // 当前悬停的目标
+
+// 开始拖拽
+function handleDragStart(e, path) {
+  dragSource = path;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', path);
+
+  // 延迟设置透明度，让拖拽镜像正常生成
+  setTimeout(() => {
+    const node = document.querySelector(`.tree-node[data-path="${path}"]`);
+    if (node) node.style.opacity = '0.4';
+  }, 0);
+}
+
+// 拖拽结束
+function handleDragEnd(e) {
+  // 恢复所有节点样式
+  document.querySelectorAll('.tree-node').forEach(node => {
+    node.style.opacity = '';
+  });
+  document.querySelectorAll('.tree-node-wrapper').forEach(wrapper => {
+    wrapper.classList.remove('drag-over');
+  });
+
+  clearTimeout(dragOverTimer);
+  dragOverTimer = null;
+  dragOverTarget = null;
+  dragSource = null;
+}
+
+// 拖拽经过目录
+function handleDragOver(e, targetPath) {
+  e.preventDefault();
+
+  if (!dragSource || targetPath === dragSource) {
+    e.dataTransfer.dropEffect = 'none';
+    return;
+  }
+
+  // 不能拖到自身子目录
+  if (targetPath !== '.' && dragSource.startsWith(targetPath + '/')) {
+    e.dataTransfer.dropEffect = 'none';
+    return;
+  }
+
+  e.dataTransfer.dropEffect = 'move';
+
+  // 高亮目标
+  const wrapper = e.currentTarget;
+  if (dragOverTarget !== targetPath) {
+    // 清除之前的高亮
+    document.querySelectorAll('.tree-node-wrapper').forEach(w => w.classList.remove('drag-over'));
+    // 添加新高亮
+    wrapper.classList.add('drag-over');
+    dragOverTarget = targetPath;
+
+    // 清除之前的定时器
+    clearTimeout(dragOverTimer);
+    dragOverTimer = null;
+
+    // 800ms 后自动展开目标目录
+    const node = state.treeNodes.get(targetPath);
+    if (node && node.type === 'directory' && !node.expanded) {
+      dragOverTimer = setTimeout(() => {
+        toggleFolder(targetPath);
+      }, 800);
+    }
+  }
+}
+
+// 拖拽离开目录
+function handleDragLeave(e, targetPath) {
+  const wrapper = e.currentTarget;
+  // 检查是否真的离开了元素（而不是进入子元素）
+  if (!wrapper.contains(e.relatedTarget)) {
+    wrapper.classList.remove('drag-over');
+    if (dragOverTarget === targetPath) {
+      dragOverTarget = null;
+      clearTimeout(dragOverTimer);
+      dragOverTimer = null;
+    }
+  }
+}
+
+// 放置到目录
+async function handleDrop(e, targetPath) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  clearTimeout(dragOverTimer);
+  dragOverTimer = null;
+
+  const wrapper = e.currentTarget;
+  wrapper.classList.remove('drag-over');
+
+  if (!dragSource || dragSource === targetPath) return;
+
+  // 不能放到自身子目录
+  if (targetPath !== '.' && dragSource.startsWith(targetPath + '/')) return;
+
+  await performMove(dragSource, targetPath);
+}
+
+// 根目录拖拽处理
+function handleRootDragOver(e) {
+  e.preventDefault();
+  if (!dragSource || dragSource === '.') {
+    e.dataTransfer.dropEffect = 'none';
+    return;
+  }
+  e.dataTransfer.dropEffect = 'move';
+}
+
+function handleRootDragLeave(e) {
+  // 根目录不需要特殊处理
+}
+
+async function handleRootDrop(e) {
+  e.preventDefault();
+  if (!dragSource) return;
+  await performMove(dragSource, '.');
+}
+
+// 执行移动操作
+async function performMove(sourcePath, targetDirPath) {
+  if (!state.currentWs) return;
+
+  const fileName = sourcePath === '.' ? '' : sourcePath.split('/').pop();
+  const newPath = targetDirPath === '.' ? fileName : `${targetDirPath}/${fileName}`;
+
+  // 检查是否移动到相同位置
+  const currentDir = sourcePath.includes('/') ? sourcePath.substring(0, sourcePath.lastIndexOf('/')) : '.';
+  if (currentDir === targetDirPath) return;
+
+  try {
+    const data = await api('/api/files/move', {
+      method: 'POST',
+      body: {
+        workspaceId: state.currentWs.id,
+        oldPath: sourcePath,
+        newPath: newPath
+      }
+    });
+
+    if (data?.success) {
+      // 更新编辑器中的文件路径
+      const openFile = state.editorFiles.find(f => f.path === sourcePath);
+      if (openFile) {
+        openFile.path = newPath;
+        updateEditorToolbar();
+        renderEditorTabs();
+      }
+      // 刷新相关目录
+      await refreshTreeNode(currentDir);
+      if (targetDirPath !== currentDir) {
+        await refreshTreeNode(targetDirPath);
+      }
+      // 展开目标目录
+      const targetNode = state.treeNodes.get(targetDirPath);
+      if (targetNode) {
+        targetNode.expanded = true;
+        state.expandedPaths.add(targetDirPath);
+        renderFileTree();
+      }
+    } else if (data?.error) {
+      alert('移动失败: ' + data.error);
+    }
+  } catch (err) {
+    if (err.message && err.message.includes('409')) {
+      // 409 冲突，显示覆盖确认
+      const confirmed = confirm(`目标位置已存在 "${fileName}"，是否覆盖？`);
+      if (confirmed) {
+        await performMoveWithForce(sourcePath, targetDirPath, newPath);
+      }
+    } else {
+      console.error('Failed to move:', err);
+      alert('移动失败: ' + err.message);
+    }
+  }
+}
+
+// 强制覆盖移动
+async function performMoveWithForce(sourcePath, targetDirPath, newPath) {
+  if (!state.currentWs) return;
+
+  const currentDir = sourcePath.includes('/') ? sourcePath.substring(0, sourcePath.lastIndexOf('/')) : '.';
+
+  try {
+    const data = await api('/api/files/move', {
+      method: 'POST',
+      body: {
+        workspaceId: state.currentWs.id,
+        oldPath: sourcePath,
+        newPath: newPath,
+        force: true
+      }
+    });
+
+    if (data?.success) {
+      // 更新编辑器中的文件路径
+      const openFile = state.editorFiles.find(f => f.path === sourcePath);
+      if (openFile) {
+        openFile.path = newPath;
+        openFile.originalContent = openFile.content; // 重置修改状态
+        openFile.isModified = false;
+        updateEditorToolbar();
+        renderEditorTabs();
+      }
+      // 如果目标文件已打开，关闭它
+      const targetOpenFile = state.editorFiles.find(f => f.path === newPath && f.path !== sourcePath);
+      if (targetOpenFile) {
+        closeFile(targetOpenFile.id);
+      }
+      // 刷新相关目录
+      await refreshTreeNode(currentDir);
+      if (targetDirPath !== currentDir) {
+        await refreshTreeNode(targetDirPath);
+      }
+      renderFileTree();
+    } else {
+      alert('移动失败: ' + (data?.error || '未知错误'));
+    }
+  } catch (err) {
+    console.error('Failed to move with force:', err);
+    alert('移动失败: ' + err.message);
+  }
+}
+
+// 获取文件图标
+function getFileIcon(filename) {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const iconMap = {
+    'ts': 'file-code',
+    'tsx': 'file-code',
+    'js': 'file-code',
+    'jsx': 'file-code',
+    'json': 'file-json',
+    'html': 'file-code',
+    'css': 'file-code',
+    'md': 'file-text',
+    'py': 'file-code',
+    'java': 'file-code',
+    'go': 'file-code',
+  };
+  return iconMap[ext] || 'file';
+}
+
+// 导航到文件夹（兼容性保留）
+async function navigateToFolder(path) {
+  await toggleFolder(path);
+}
+
+// 打开文件
+async function openFile(path) {
+  if (!state.currentWs) return;
+
+  // 检查文件是否已经打开
+  const existingFile = state.editorFiles.find(f => f.path === path);
+  if (existingFile) {
+    switchToFile(existingFile.id);
+    return;
+  }
+
+  try {
+    const data = await api(`/api/files/content?workspaceId=${state.currentWs.id}&path=${encodeURIComponent(path)}`);
+    if (!data || !data.success) {
+      alert('无法打开文件: ' + (data?.error || '未知错误'));
+      return;
+    }
+
+    const fileId = uid();
+    const newFile = {
+      id: fileId,
+      path: data.path,
+      content: data.content,
+      originalContent: data.content,
+      language: data.language || 'plaintext',
+      isModified: false
+    };
+
+    state.editorFiles.push(newFile);
+    switchToFile(fileId);
+  } catch (err) {
+    console.error('Failed to open file:', err);
+    alert('打开文件失败: ' + err.message);
+  }
+}
+
+// 切换到指定文件
+function switchToFile(fileId) {
+  state.currentEditorFile = fileId;
+  const file = state.editorFiles.find(f => f.id === fileId);
+  if (!file) return;
+
+  // 确保编辑器已初始化
+  if (!state.editor) {
+    initMonacoEditor();
+    // 等待 Monaco 初始化完成
+    setTimeout(() => switchToFile(fileId), 100);
+    return;
+  }
+
+  // 隐藏空状态，显示编辑器和工具栏
+  $('editor-empty').classList.add('hidden');
+  $('monaco-editor').classList.remove('hidden');
+  $('editor-toolbar').classList.remove('hidden');
+
+  // 设置编辑器内容
+  state.editor.setValue(file.content);
+  window.monaco.editor.setModelLanguage(state.editor.getModel(), file.language);
+
+  // 更新工具栏文件名
+  updateEditorToolbar();
+  renderEditorTabs();
+  updateEditorStatus();
+}
+
+// 更新编辑器工具栏
+function updateEditorToolbar() {
+  const file = state.editorFiles.find(f => f.id === state.currentEditorFile);
+  const filenameEl = $('editor-filename');
+  const unsavedEl = $('unsaved-indicator');
+
+  if (!file) {
+    $('editor-toolbar').classList.add('hidden');
+    return;
+  }
+
+  const filename = file.path.split('/').pop() || file.path;
+  if (filenameEl) filenameEl.textContent = filename;
+
+  // 更新未保存指示器
+  if (unsavedEl) {
+    if (file.isModified) {
+      unsavedEl.classList.remove('hidden');
+    } else {
+      unsavedEl.classList.add('hidden');
+    }
+  }
+}
+
+// 显示保存状态提示
+function showSaveStatus(message, isSuccess = true) {
+  const statusEl = $('save-status');
+  if (!statusEl) return;
+
+  statusEl.textContent = message;
+  statusEl.className = `text-[10px] font-mono transition-opacity ${isSuccess ? 'text-green-600' : 'text-red-500'}`;
+  statusEl.style.opacity = '1';
+
+  setTimeout(() => {
+    statusEl.style.opacity = '0';
+  }, 2000);
+}
+
+// 渲染编辑器 Tabs
+function renderEditorTabs() {
+  const container = $('editor-tabs');
+  if (!container) return;
+
+  if (state.editorFiles.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+
+  container.innerHTML = state.editorFiles.map(file => {
+    const isActive = file.id === state.currentEditorFile;
+    const filename = file.path.split('/').pop() || file.path;
+    const modifiedIndicator = file.isModified ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-500 ml-1"></span>' : '';
+
+    return `
+      <div class="editor-tab flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-medium ${isActive ? 'active' : 'bg-white/40'}"
+           onclick="switchToFile('${file.id}')">
+        <i data-lucide="file-code" class="w-3 h-3 opacity-60"></i>
+        <span class="truncate max-w-[100px]">${filename}</span>
+        ${modifiedIndicator}
+        <button class="close-btn ml-1 p-0.5 rounded hover:bg-slate-200/50" onclick="closeFile('${file.id}', event)">
+          <i data-lucide="x" class="w-3 h-3"></i>
+        </button>
+      </div>
+    `;
+  }).join('');
+
+  lucide.createIcons({ nodes: [container] });
+}
+
+// 关闭文件
+function closeFile(fileId, event) {
+  if (event) event.stopPropagation();
+
+  const fileIndex = state.editorFiles.findIndex(f => f.id === fileId);
+  if (fileIndex === -1) return;
+
+  const file = state.editorFiles[fileIndex];
+
+  // 如果有未保存的修改，提示用户
+  if (file.isModified) {
+    if (!confirm(`文件 "${file.path}" 有未保存的修改，确定要关闭吗？`)) {
+      return;
+    }
+  }
+
+  state.editorFiles.splice(fileIndex, 1);
+
+  // 如果关闭的是当前文件，切换到其他文件
+  if (state.currentEditorFile === fileId) {
+    if (state.editorFiles.length > 0) {
+      const newIndex = Math.min(fileIndex, state.editorFiles.length - 1);
+      switchToFile(state.editorFiles[newIndex].id);
+    } else {
+      // 没有文件了，显示空状态，隐藏工具栏
+      state.currentEditorFile = null;
+      if (state.editor) {
+        state.editor.setValue('');
+      }
+      $('editor-empty').classList.remove('hidden');
+      $('monaco-editor').classList.add('hidden');
+      $('editor-toolbar').classList.add('hidden');
+    }
+  }
+
+  renderEditorTabs();
+}
+
+// 保存当前文件
+async function saveCurrentFile() {
+  if (!state.currentEditorFile || !state.currentWs) {
+    console.error('[Save] No current file or workspace');
+    return;
+  }
+
+  const file = state.editorFiles.find(f => f.id === state.currentEditorFile);
+  if (!file) {
+    console.error('[Save] File not found in editorFiles:', state.currentEditorFile);
+    return;
+  }
+
+  // 获取编辑器最新内容
+  const content = state.editor.getValue();
+  console.log('[Save] Saving file:', file.path, 'size:', content.length, 'chars');
+
+  try {
+    const data = await api('/api/files/content', {
+      method: 'PUT',
+      body: {
+        workspaceId: state.currentWs.id,
+        path: file.path,
+        content: content
+      }
+    });
+
+    if (!data || !data.success) {
+      console.error('[Save] Server returned error:', data?.error);
+      showSaveStatus('保存失败', false);
+      alert('保存失败: ' + (data?.error || '未知错误'));
+      return;
+    }
+
+    console.log('[Save] Server responded success, verifying...');
+
+    // 验证：重新读取文件内容对比
+    const verifyRes = await fetch(`/api/files/content?workspaceId=${state.currentWs.id}&path=${encodeURIComponent(file.path)}`);
+    const verifyData = await verifyRes.json();
+
+    if (!verifyData.success) {
+      console.error('[Save] Verification read failed:', verifyData.error);
+      showSaveStatus('保存失败', false);
+      alert('保存验证失败: ' + verifyData.error);
+      return;
+    }
+
+    if (verifyData.content !== content) {
+      console.error('[Save] Content mismatch after save');
+      console.log('[Save] Expected length:', content.length, 'Got:', verifyData.content.length);
+      showSaveStatus('保存验证失败', false);
+      alert('保存验证失败：内容不一致');
+      return;
+    }
+
+    console.log('[Save] Verification passed, updating state');
+
+    // 更新文件状态
+    file.originalContent = content;
+    file.content = content;
+    file.isModified = false;
+
+    // 更新 UI
+    updateEditorToolbar();
+    renderEditorTabs();
+    showSaveStatus('已保存 ✓', true);
+  } catch (err) {
+    console.error('[Save] Exception:', err);
+    showSaveStatus('保存失败', false);
+    alert('保存失败: ' + err.message);
+  }
+}
+
+// 更新编辑器状态显示
+function updateEditorStatus() {
+  const file = state.editorFiles.find(f => f.id === state.currentEditorFile);
+
+  // 更新工具栏未保存指示器
+  const unsavedEl = $('unsaved-indicator');
+  if (unsavedEl && file) {
+    if (file.isModified) {
+      unsavedEl.classList.remove('hidden');
+    } else {
+      unsavedEl.classList.add('hidden');
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+// 启动
+// ─────────────────────────────────────────────
+;(async () => {
+  lucide.createIcons()
+  try {
+    const me = await api('/api/auth/me')
+    if (me) {
+      // 字段映射: API 返回 { user: { userId, role } }
+      const user = me.user || me
+      $('login-screen').classList.add('hidden')
+      $('avatar').textContent=(user.userId||user.username||'AD').slice(0,2).toUpperCase()
+      await loadWorkspaces()
+      startStatusPoll()
+
+      // 恢复上次访问的视图
+      const lastView = localStorage.getItem('lastView')
+      if (lastView && ['intelligence', 'engineering', 'automation', 'observability', 'logs'].includes(lastView)) {
+        sw(lastView)
+      }
+    }
+    else showLogin()
+  } catch { showLogin() }
+})()
+</script>
+</body>
+</html>

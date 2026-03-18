@@ -1,0 +1,89 @@
+server:
+  port: 8888
+  host: 0.0.0.0
+
+# 数据存储目录（相对路径基于项目根目录，或绝对路径如 /data/assistant）
+dataDir: ./data
+
+auth:
+  token_expire_days: 7
+  login_rate_limit: 5
+
+claude:
+  model: "claude-opus-4-6"
+  max_tokens: 4096
+  count_tokens_enabled: false
+  count_tokens_fixed: 2000
+  context_window_messages: 0  # 0 = 不限制轮次，由 compact 控制
+  compact:
+    enabled: true
+    threshold_ratio: 0.85   # 超过 max_tokens × 0.85 时触发（与 token_limit 同时满足）
+    token_limit: 40000      # estimated tokens 超过此值才触发
+    preserve_rounds: 4
+    summary_model: "claude-haiku-4-5-20251001"
+    max_summary_tokens: 800
+
+runner:
+  idle_timeout_minutes: 60
+  max_crash_retries: 5
+
+terminal:
+  max_sessions: 5
+  # shell: 自动探测 (process.env.SHELL > dscl > /bin/sh)
+
+files:
+  allowed_roots:
+    - /home/server
+    - /etc/nginx
+    - /tmp/workspaces
+
+lark:
+  enabled: true
+
+tasks:
+  max_history_per_task: 100
+
+logs:
+  retention_days: 90
+  terminal_logging: false
+  # 后端控制台日志总开关（console.*）
+  backend_console_enabled: true
+  # 后端日志级别阈值：debug|info|warn|error
+  backend_console_level: "info"
+  # HTTP 访问日志（hono logger）
+  http_access_enabled: true
+  # 前端浏览器控制台日志总开关
+  browser_console_enabled: true
+  # 前端调试日志开关（[WS-DEBUG] / devLog 等）
+  browser_debug_enabled: false
+
+ops:
+  alert:
+    max_fix_attempts: 3
+    model: "claude-haiku-4-5-20251001"
+
+memory:
+  workspace:
+    enabled: true
+    max_chars: 300
+    todolist_filenames: [todo.md, TODO.md, todolist.md]
+  impression:
+    enabled: true
+    min_confidence: 0.7
+    max_chars: 300
+  watcher:
+    enabled: true
+    inactive_hours: 1
+    scan_interval_minutes: 5
+
+# 技能扫描配置（workspace 优先于 global）
+skills:
+  # 相对工作区根目录，如 <workspace>/skills
+  workspace_dirs:
+    - skills
+  # 相对项目根目录或绝对路径；可扩展自定义目录
+  global_dirs:
+    - scripts/skills
+    - src/skills
+  # Skill Catalog 中每条摘要的最大长度
+  catalog_max_summary_chars: 120
