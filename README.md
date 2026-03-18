@@ -1,8 +1,37 @@
-# AI Assistant - 个人智能工作台
+# AI Assistant - Personal Agent Runtime
 
-一个以 **Claude API** 为核心的工程化练手项目，提供对话、文件管理、终端、任务调度等一体化 AI 工作平台。
+一个面向个人开发者的 **AI Agent 运行时系统**，支持：
 
-> ⚠️ **重要提示：本项目仅支持 Anthropic Claude API**，不支持 OpenAI 或其他模型接口。
+- 多工作区上下文记忆
+- 工具调用（文件 / 终端 / 网络 / 任务调度）
+- 自动化运维（任务失败分析 + 自修复）
+- Web / 飞书 多渠道统一接入
+
+> ⚠️ 当前仅支持 Anthropic Claude API
+
+---
+
+## ✨ What makes this different?
+
+它更像一个：
+
+> 🧠 **“会记忆、能操作、可长期运行的个人 AI 工作台”**
+
+---
+
+## 🧩 Core Capabilities
+
+- 🧠 **Workspace-aware memory**  
+  AI 能记住每个项目的上下文、技术选型和历史决策
+
+- 🛠 **Tool-driven execution**  
+  支持 Shell / 文件 / 网络 / 任务调度等 18+ 工具
+
+- 🔁 **Autonomous operations**  
+  定时任务失败 → AI 自动分析 → 提供修复方案
+
+- 🌐 **Multi-channel interface**  
+  Web UI + 飞书机器人共用同一套 Agent
 
 ---
 
