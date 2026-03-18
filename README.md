@@ -1,83 +1,221 @@
-# 个人智能工作台（练手项目）
+# AI Assistant - 个人智能工作台
 
-这是一个偏工程化的练手作品，主项目是 `assistant/`，`searxng/` 作为可选搜索能力。
+一个以 **Claude API** 为核心的工程化练手项目，提供对话、文件管理、终端、任务调度等一体化 AI 工作平台。
 
-## 思路
+> ⚠️ **重要提示：本项目仅支持 Anthropic Claude API**，不支持 OpenAI 或其他模型接口。
 
-这个项目核心是把一个“能聊天”的应用，往“能干活”的方向推进：
+---
 
-- 前端：提供聊天、文件管理、终端、任务面板这些基础操作入口
-- 后端：统一接收请求，组织上下文，调用模型和工具，再把结果流式返回前端
-- 工具化：不仅输出文字，还能读写文件、执行命令、搜索网页、操作待办
-- 可配置：通过 `config.yaml` + `data/.env` 控制端口、鉴权、日志、模型、工具开关
-- 可拆分：主能力在 `assistant/`，联网搜索交给 `searxng/`，降低耦合
+## 核心特性
 
-目录关系：
+### 1. AI 对话与工具调用
+- **流式对话**：基于 WebSocket 的实时消息流
+- **工具系统**：Claude 可调用多种工具完成任务
+- **人机确认**：危险操作（删除文件、执行命令等）需人工确认
+- **上下文管理**：自动 compact 超长对话，保持上下文窗口健康
 
-```text
-.
-├── assistant/   # 主项目（Web + API + Agent + Tools）
-└── searxng/     # 搜索服务（可选）
-```
+### 2. 内置工具集（Tools）
 
-## 用法
+| 工具 | 功能描述 |
+|------|----------|
+| `bash` | 执行 Shell 命令，支持超时和危险命令检测 |
+| `read_file` | 读取文件内容 |
+| `write_file` | 写入文件（覆盖/追加） |
+| `delete_file` | 删除文件（需确认） |
+| `move_file` | 移动/重命名文件（需确认） |
+| `todo_read` / `todo_write` | 读写工作区待办事项 |
+| `create_task` | 创建定时任务（Cron 表达式） |
+| `web_search` | 网页搜索（需配置 SearXNG） |
+| `web_fetch` | 抓取网页内容 |
+| `read_skill` | 读取 Skill 技能定义 |
+| `claude_code` | 调用 Claude Code CLI |
+| `recall` | 向量检索历史对话 |
+| `read_workspace_memory` | 读取工作区记忆 |
+| `read_impression` | 读取用户印象记忆 |
+| `note_write` / `note_read` / `note_search` | 笔记管理 |
 
-### 1. 启动搜索服务（可选）
+### 3. Web 界面功能
+- **对话面板**：多工作区隔离，Markdown 渲染
+- **文件管理器**：树形浏览、编辑、上传下载
+- **终端**：多会话 Web Terminal（基于 node-pty + xterm.js）
+- **任务面板**：Cron 定时任务管理
+- **仪表盘**：系统状态、运行器状态、日志流
+- **记忆面板**：工作区记忆、用户印象管理
+
+### 4. 工程化特性
+- **工作区隔离**：多项目并行，数据互不影响
+- **JWT 认证**：基于 JWT 的登录鉴权
+- **飞书集成**：支持 Lark 机器人接入（可选）
+- **自动归档**：定期归档历史消息
+- **向量化检索**：基于 Transformers.js 的本地 Embedding
+- **优雅关闭**：SIGTERM 时安全断开 WebSocket、停止定时任务
+
+---
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端 | 原生 JS + Tailwind CSS + Monaco Editor + Xterm.js |
+| 后端 | Node.js + TypeScript + Hono |
+| 数据库 | SQLite (better-sqlite3) |
+| AI | Anthropic Claude API (@anthropic-ai/sdk) |
+| 终端 | node-pty |
+| 向量 | @xenova/transformers |
+
+---
+
+## 快速开始
+
+### 1. 克隆与进入目录
 
 ```bash
-cd searxng
+git clone https://github.com/lijx122/ai-assistant.git
+cd ai-assistant
+```
+
+### 2. 配置环境变量
+
+```bash
+cd assistant
+cp .env.example data/.env
+```
+
+编辑 `data/.env`，填入以下**必填项**：
+
+```bash
+# Claude API 密钥（必需）
+ANTHROPIC_API_KEY=your_api_key_here
+
+# JWT 密钥（生产环境请使用强随机字符串）
+JWT_SECRET=your_random_secret
+
+# 登录账号
+AUTH_USERNAME=admin
+AUTH_PASSWORD=your_password
+```
+
+可选配置：
+```bash
+# 如果启用 SearXNG 搜索
+WEB_SEARCH_BASE_URL=http://127.0.0.1:8887
+
+# 飞书集成（可选）
+LARK_APP_ID=xxx
+LARK_APP_SECRET=xxx
+LARK_DEFAULT_CHAT_ID=xxx
+```
+
+### 3. 启动搜索服务（可选）
+
+如需网页搜索功能：
+
+```bash
+cd ../searxng
 docker compose up -d
 ```
 
 默认地址：`http://127.0.0.1:8887`
 
-### 2. 配置主项目环境变量
+### 4. 安装依赖并启动
 
 ```bash
 cd ../assistant
-cp .env.example data/.env
-```
-
-至少填写这些：
-
-- `ANTHROPIC_API_KEY`
-- `JWT_SECRET`
-- `AUTH_USERNAME`
-- `AUTH_PASSWORD`
-
-如果你启用了 `searxng`，再加：
-
-```bash
-WEB_SEARCH_BASE_URL=http://127.0.0.1:8887
-```
-
-### 3. 安装并启动
-
-```bash
-cd assistant
 npm install
-npm run rebuild:pty
-npm run dev
+npm run rebuild:pty  # 编译 node-pty 原生模块
+npm run dev          # 开发模式启动
 ```
 
-访问：`http://0.0.0.0:8888`
+访问：`http://localhost:8888`
 
-### 4. 常用命令
+---
+
+## 常用命令
 
 ```bash
-npm run build        # 构建
-npm run dev          # 开发启动（build 后启动）
-npm run test         # 测试
+npm run build        # 构建 TypeScript
+npm run dev          # 开发启动（build + 启动）
+npm run dev:watch    # 热重载模式
+npm run test         # 运行测试（Vitest）
 npm run rebuild:pty  # 迁移机器后重编译 node-pty
 ```
 
-### 5. 源码打包（用于开源）
+---
 
-打包时建议排除：
+## 配置说明
 
-- `assistant/data/`
-- `assistant/data/.env`
-- `assistant/node_modules/`
-- `assistant/dist/`
-- `assistant/coverage/`
-- `assistant/logs/`
+### config.yaml
+
+主配置文件，控制端口、模型参数、日志等：
+
+```yaml
+server:
+  port: 8888
+  host: 0.0.0.0
+
+claude:
+  model: "claude-opus-4-6"      # 主模型
+  max_tokens: 4096              # 最大输出 Token
+  context_window_messages: 0    # 0 = 不限制轮次
+  compact:
+    enabled: true               # 超长对话自动压缩
+    token_limit: 40000
+    preserve_rounds: 4
+    summary_model: "claude-haiku-4-5-20251001"
+```
+
+### .env 模型配置
+
+```bash
+# 主对话模型
+MODEL_CHAT=claude-sonnet-4-6
+
+# Compact 摘要模型
+MODEL_COMPACT=claude-haiku-4-5-20251001
+
+# 任务/Agent 模型
+MODEL_AGENT=claude-sonnet-4-6
+```
+
+---
+
+## 项目结构
+
+```
+.
+├── assistant/           # 主项目
+│   ├── src/
+│   │   ├── server.ts           # HTTP + WebSocket 服务
+│   │   ├── routes/             # API 路由
+│   │   ├── services/           # 业务逻辑
+│   │   │   ├── tools/          # 工具实现
+│   │   │   ├── agent-runner.ts # Claude 运行器
+│   │   │   └── ...
+│   │   ├── db/                 # SQLite 数据库
+│   │   └── config.ts           # 配置管理
+│   ├── web/              # 前端静态文件
+│   ├── data/             # 数据目录（含 .env）
+│   └── config.yaml       # 主配置
+│
+└── searxng/             # 搜索服务（可选）
+    └── docker-compose.yml
+```
+
+---
+
+## 安全注意事项
+
+1. **不要将 `data/.env` 提交到 Git**，已包含在 `.gitignore` 中
+2. **危险操作确认**：删除、移动、某些 bash 命令需要人工确认
+3. **文件访问限制**：通过 `config.yaml` 的 `files.allowed_roots` 控制可访问路径
+4. **JWT 密钥**：生产环境请使用强随机字符串
+
+---
+
+## License
+
+ISC
+
+---
+
+> 这是一个练手项目，欢迎交流学习，不推荐直接用于生产环境。
