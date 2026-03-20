@@ -94,9 +94,15 @@ export async function executeClaudeCode(
             cwd: actualCwd,
             stdio: ['ignore', 'pipe', 'pipe'],
             env: {
-                ...process.env,
-                // 确保 API key 透传
+                // 只传递必要的 ASCII 安全的环境变量
+                PATH: process.env.PATH,
+                HOME: process.env.HOME,
+                USER: process.env.USER,
                 ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
+                ANTHROPIC_BASE_URL: process.env.ANTHROPIC_BASE_URL,
+                // 强制使用 C 语言环境，避免中文编码问题
+                LANG: 'C',
+                LC_ALL: 'C',
             },
         });
 
