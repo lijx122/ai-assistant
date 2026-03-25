@@ -28,33 +28,31 @@ sessionRouter.get('/', (c) => {
     if (!workspaceId) return c.json({ error: 'Missing workspaceId' }, 400);
 
     const db = getDb();
-    // 按 last_active_at 降序，无 last_active_at 的按 started_at
     const sessions = db.prepare(
-        `SELECT * FROM sessions
-         WHERE workspace_id = ?
-         ORDER BY COALESCE(last_active_at, started_at) DESC`
-    ).all(workspaceId);
+        `SELECT s.*,
+                COUNT(m.id) as message_count,
+                MAX(m.created_at) as last_message_at,
+                (
+                    SELECT m2.content
+                    FROM messages m2
+                    WHERE m2.session_id = s.id AND m2.role = 'user'
+                    ORDER BY m2.created_at ASC
+                    LIMIT 1
+                ) as first_message
+         FROM sessions s
+         LEFT JOIN messages m ON m.session_id = s.id
+         WHERE s.workspace_id = ?
+         GROUP BY s.id
+         ORDER BY COALESCE(s.last_active_at, s.started_at) DESC`
+    ).all(workspaceId) as any[];
 
-    // 补充每个会话的消息数和首条消息
-    const sessionsWithMeta = (sessions as any[]).map(s => {
-        const msgCount = db.prepare(
-            'SELECT COUNT(*) as count FROM messages WHERE session_id = ?'
-        ).get(s.id) as { count: number };
-
-        const firstMsg = db.prepare(
-            'SELECT content FROM messages WHERE session_id = ? AND role = ? ORDER BY created_at ASC LIMIT 1'
-        ).get(s.id, 'user') as { content: string } | undefined;
-
-        return {
-            ...s,
-            messageCount: msgCount?.count || 0,
-            firstMessage: firstMsg?.content || '',
-            // 兼容前端字段命名
-            createdAt: s.started_at,
-            // 返回 source/channel 用于前端区分来源
-            source: s.channel || 'web',
-        };
-    });
+    const sessionsWithMeta = sessions.map(s => ({
+        ...s,
+        messageCount: s.message_count || 0,
+        firstMessage: s.first_message || '',
+        createdAt: s.started_at,
+        source: s.channel || 'web',
+    }));
 
     return c.json({ sessions: sessionsWithMeta });
 });
@@ -111,38 +109,36 @@ sessionRouter.delete('/:id', (c) => {
         return c.json({ error: 'Workspace not found' }, 404);
     }
 
-    // 1. 删除数据库记录（手动级联删除所有关联表）
-    // 删除消息相关数据
-    const delMessages = db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'messages changes:', delMessages.changes);
+    // 1. 删除数据库记录（手动级联删除所有关联表，事务保证原子性）
+    const deleteSession = db.transaction((sessionId: string) => {
+        const delSdkCalls = db.prepare('DELETE FROM sdk_calls WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'sdk_calls changes:', delSdkCalls.changes);
 
-    // 删除 SDK 调用记录
-    const delSdkCalls = db.prepare('DELETE FROM sdk_calls WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'sdk_calls changes:', delSdkCalls.changes);
+        const delEmbeddings = db.prepare('DELETE FROM message_embeddings WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'message_embeddings changes:', delEmbeddings.changes);
 
-    // 删除消息嵌入向量（语义检索）
-    const delEmbeddings = db.prepare('DELETE FROM message_embeddings WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'message_embeddings changes:', delEmbeddings.changes);
+        const delMessagesFts = db.prepare('DELETE FROM messages_fts WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'messages_fts changes:', delMessagesFts.changes);
 
-    // 删除消息全文检索索引
-    const delMessagesFts = db.prepare('DELETE FROM messages_fts WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'messages_fts changes:', delMessagesFts.changes);
+        const delMessages = db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'messages changes:', delMessages.changes);
 
-    // 删除会话压缩快照
-    const delCompacts = db.prepare('DELETE FROM session_compacts WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'session_compacts changes:', delCompacts.changes);
+        const delCompacts = db.prepare('DELETE FROM session_compacts WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'session_compacts changes:', delCompacts.changes);
 
-    // 删除压缩快照全文检索（归档 Recall）
-    const delCompactFts = db.prepare('DELETE FROM compact_fts WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'compact_fts changes:', delCompactFts.changes);
+        const delCompactFts = db.prepare('DELETE FROM compact_fts WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'compact_fts changes:', delCompactFts.changes);
 
-    // 删除关联的告警记录
-    const delAlerts = db.prepare('DELETE FROM alerts WHERE session_id = ?').run(id);
-    console.log('[Delete] session', id, 'alerts changes:', delAlerts.changes);
+        const delAlerts = db.prepare('DELETE FROM alerts WHERE session_id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'alerts changes:', delAlerts.changes);
 
-    // 最后删除会话本身
-    const delSession = db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
-    console.log('[Delete] session', id, 'sessions changes:', delSession.changes);
+        const delSession = db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+        console.log('[Delete] session', sessionId, 'sessions changes:', delSession.changes);
+
+        return { delSession };
+    });
+
+    const { delSession } = deleteSession(id);
 
     if (delSession.changes === 0) {
         console.warn('[Delete] session', id, 'failed: no rows deleted');

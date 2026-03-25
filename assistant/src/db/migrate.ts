@@ -264,6 +264,22 @@ const migrations: Migration[] = [
             CREATE INDEX IF NOT EXISTS idx_logs_trace ON logs(trace_id, timestamp DESC);
         `,
     },
+    {
+        version: 16,
+        name: 'add_performance_indexes',
+        sql: `
+            CREATE INDEX IF NOT EXISTS idx_sessions_workspace_created
+                ON sessions(workspace_id, started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_messages_session_created
+                ON messages(session_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_tasks_workspace
+                ON tasks(workspace_id, status);
+            CREATE INDEX IF NOT EXISTS idx_logs_timestamp
+                ON logs(timestamp DESC);
+            CREATE INDEX IF NOT EXISTS idx_logs_category
+                ON logs(category, timestamp DESC);
+        `,
+    },
 ];
 
 /**

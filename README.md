@@ -85,7 +85,7 @@
 
 | 层级 | 技术 |
 |------|------|
-| 前端 | 原生 JS + Tailwind CSS + Monaco Editor + Xterm.js |
+| 前端 | Vue 3 + Vite + Tailwind CSS + Monaco Editor + Xterm.js |
 | 后端 | Node.js + TypeScript + Hono |
 | 数据库 | SQLite (better-sqlite3) |
 | AI | Anthropic Claude API (@anthropic-ai/sdk) |
@@ -150,7 +150,7 @@ docker compose up -d
 
 ```bash
 cd ../assistant
-npm install
+npm install        # 一次安装后端 + Web 前端全部依赖
 npm run rebuild:pty  # 编译 node-pty 原生模块
 npm run dev          # 开发模式启动
 ```
@@ -163,8 +163,12 @@ npm run dev          # 开发模式启动
 
 ```bash
 npm run build        # 构建 TypeScript
+npm run build:vue    # 构建 Vue 前端
+npm run build:all    # 构建前端 + 后端
 npm run dev          # 开发启动（build + 启动）
 npm run dev:watch    # 热重载模式
+npm run dev:vue      # 仅启动 Vue 开发服务器
+npm run dev:full     # 同时启动后端 watch + 前端 dev
 npm run test         # 运行测试（Vitest）
 npm run rebuild:pty  # 迁移机器后重编译 node-pty
 ```
@@ -222,7 +226,8 @@ MODEL_AGENT=claude-sonnet-4-6
 │   │   │   └── ...
 │   │   ├── db/                 # SQLite 数据库
 │   │   └── config.ts           # 配置管理
-│   ├── web/              # 前端静态文件
+│   ├── web-vue/          # Vue 前端源码
+│   ├── web-vue-dist/     # Vue 构建产物（由后端静态托管）
 │   ├── data/             # 数据目录（含 .env）
 │   └── config.yaml       # 主配置
 │
@@ -246,4 +251,3 @@ MODEL_AGENT=claude-sonnet-4-6
 ISC
 
 ---
-

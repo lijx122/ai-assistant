@@ -547,17 +547,22 @@ export const clearRunners = () => {
 };
 
 // 获取 Runner 状态（用于 dashboard）
-export const getRunnerStatus = (): { status: 'ok' | 'warn' | 'error'; detail?: string } => {
-    const count = runners.size;
-    if (count === 0) {
-        return { status: 'ok', detail: 'idle' };
-    }
-    // 检查是否有被销毁但还在 map 中的 runner
+export const getRunnerStatus = (): {
+    status: 'ok' | 'warn' | 'error';
+    activeCount: number;
+    queueSize: number;
+} => {
     let activeCount = 0;
-    for (const [id, runner] of runners) {
+    for (const [, runner] of runners) {
         if (!(runner as any).isDestroyed) {
             activeCount++;
         }
     }
-    return { status: 'ok', detail: `${activeCount} active` };
+    // 检查队列大小（如果有队列管理）
+    const queueSize = (global as any).__runnerQueue?.length || 0;
+    return {
+        status: 'ok',
+        activeCount,
+        queueSize,
+    };
 };

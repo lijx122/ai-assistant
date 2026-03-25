@@ -26,8 +26,11 @@ interface CachedToken {
 interface TokenCache {
     sessionId: string;
     tokens: CachedToken[];
+    createdAt: number;
 }
 const tokenBuffer = new Map<string, TokenCache>();
+const TOKEN_BUFFER_TTL_MS = 5 * 60 * 1000;
+const TOKEN_BUFFER_CLEANUP_INTERVAL_MS = 60 * 1000;
 
 /**
  * WebSocket 渠道实现
@@ -35,6 +38,7 @@ const tokenBuffer = new Map<string, TokenCache>();
  */
 export class WebSocketChannel extends Channel {
     readonly name = 'websocket';
+    private tokenBufferCleanupTimer?: NodeJS.Timeout;
 
     /**
      * WebSocket 渠道总是可用（只要有前端连接即可）
@@ -59,10 +63,18 @@ export class WebSocketChannel extends Channel {
 
     async initialize(): Promise<void> {
         this.initialized = true;
+        this.tokenBufferCleanupTimer = setInterval(() => {
+            this.cleanupExpiredTokenBuffers();
+        }, TOKEN_BUFFER_CLEANUP_INTERVAL_MS);
         console.log('[WebSocketChannel] Initialized');
     }
 
     async shutdown(): Promise<void> {
+        if (this.tokenBufferCleanupTimer) {
+            clearInterval(this.tokenBufferCleanupTimer);
+            this.tokenBufferCleanupTimer = undefined;
+        }
+
         // 关闭所有连接
         for (const [workspaceId, connections] of wsConnections) {
             for (const ws of connections) {
@@ -283,13 +295,20 @@ export class WebSocketChannel extends Channel {
 
         // 提取 token 类型和内容用于缓存
         let tokenToCache: CachedToken | null = null;
-        if (payload.type === 'token' && payload.payload?.content !== undefined) {
+        if ((payload.type === 'token' || payload.type === 'text') && payload.payload !== undefined) {
             tokenToCache = {
-                type: payload.payload.type || 'text',
-                content: payload.payload.content,
+                type: payload.type === 'token' ? (payload.payload.type || 'text') : 'text',
+                content: payload.type === 'token' ? payload.payload.content : payload.payload,
                 timestamp: Date.now()
             };
-        } else if (payload.type === 'tool_call' || payload.type === 'tool_result' || payload.type === 'error' || payload.type?.includes('confirmation')) {
+        } else if (
+            payload.type === 'tool_call' ||
+            payload.type === 'tool_result' ||
+            payload.type === 'error' ||
+            payload.type === 'done' ||
+            payload.type === 'task_running' ||
+            payload.type?.includes('confirmation')
+        ) {
             tokenToCache = {
                 type: payload.type,
                 content: payload.payload || payload,
@@ -337,7 +356,8 @@ export class WebSocketChannel extends Channel {
         } else {
             tokenBuffer.set(workspaceId, {
                 sessionId: '', // 会在 replay 时更新
-                tokens: [token]
+                tokens: [token],
+                createdAt: Date.now(),
             });
         }
     }
@@ -348,6 +368,12 @@ export class WebSocketChannel extends Channel {
     replayCachedTokens(workspaceId: string, ws: any, sessionId?: string): void {
         const cache = tokenBuffer.get(workspaceId);
         if (!cache || cache.tokens.length === 0) {
+            return;
+        }
+
+        if (Date.now() - cache.createdAt > TOKEN_BUFFER_TTL_MS) {
+            tokenBuffer.delete(workspaceId);
+            console.log(`[WebSocketChannel] Discarded expired token buffer for workspace ${workspaceId.slice(0, 8)}`);
             return;
         }
 
@@ -371,6 +397,22 @@ export class WebSocketChannel extends Channel {
             } catch (err) {
                 console.error('[WebSocketChannel] Replay error:', err);
             }
+        }
+    }
+
+    private cleanupExpiredTokenBuffers(): void {
+        const now = Date.now();
+        let cleaned = 0;
+
+        for (const [workspaceId, cache] of tokenBuffer.entries()) {
+            if (now - cache.createdAt > TOKEN_BUFFER_TTL_MS) {
+                tokenBuffer.delete(workspaceId);
+                cleaned++;
+            }
+        }
+
+        if (cleaned > 0) {
+            console.log(`[WebSocketChannel] Cleaned ${cleaned} expired token buffers`);
         }
     }
 

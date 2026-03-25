@@ -17,7 +17,7 @@ const mockConfig = {
             threshold_ratio: 0.8,
             token_limit: 10000,  // 测试中设为较低值，使现有测试数据能触发压缩
             preserve_rounds: 4,
-            summary_model: 'claude-haiku-4-5-20251001',
+            summary_model: 'claude-haiku-4-5',
             max_summary_tokens: 500,
         },
     },

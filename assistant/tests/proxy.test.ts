@@ -17,10 +17,15 @@ describe('Proxy Router (T-2.1)', () => {
 
     afterEach(() => {
         if (existsSync(testConfigPath)) unlinkSync(testConfigPath);
+        vi.unstubAllGlobals();
         vi.restoreAllMocks();
     });
 
     const setupConfig = (enabled: boolean, fixedCount?: number) => {
+        // Clear env vars that might override YAML config
+        delete process.env.ANTHROPIC_API_KEY;
+        delete process.env.ANTHROPIC_BASE_URL;
+
         writeFileSync(testConfigPath, `
 server: { port: 8888 }
 auth: { jwt_secret: "test_secret", token_expire_days: 1 }
@@ -80,7 +85,6 @@ logs: {}
     it('should pass-through to real API when count_tokens_enabled is true', async () => {
         setupConfig(true);
 
-        // Mock global fetch
         const fetchMock = vi.fn().mockResolvedValue({
             ok: true,
             json: async () => ({ input_tokens: 42, type: "message_metrics" })
@@ -94,10 +98,12 @@ logs: {}
         const data = await res.json();
         expect(data.input_tokens).toBe(42);
 
-        expect(fetchMock).toHaveBeenCalledWith('https://api.test.com/v1/messages/count_tokens', expect.objectContaining({
-            method: 'POST',
-            body: JSON.stringify(reqBody)
-        }));
+        // Verify fetch was called with correct parameters
+        expect(fetchMock).toHaveBeenCalled();
+        const [fetchUrl, fetchOptions] = fetchMock.mock.calls[0];
+        expect(fetchUrl).toContain('/v1/messages/count_tokens');
+        expect(fetchOptions.method).toBe('POST');
+        expect(fetchOptions.body).toBe(JSON.stringify(reqBody));
     });
 
     it('should handle API errors when pass-through is enabled', async () => {

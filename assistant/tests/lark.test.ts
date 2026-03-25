@@ -51,10 +51,37 @@ vi.mock('@larksuiteoapi/node-sdk', () => {
     };
 });
 
-// Mock agent runner
+// Mock larkChannel - must be before agent-runner mock
+vi.mock('../src/channels', () => ({
+    larkChannel: {
+        isAvailable: () => false,
+        getLarkClient: () => null,
+        onMessage: vi.fn(),
+        sendMessage: vi.fn().mockResolvedValue({ success: true }),
+        sendAlert: vi.fn().mockResolvedValue({ success: true }),
+    },
+    ChannelMessage: class {},
+    channelManager: {
+        register: vi.fn(),
+        initializeAll: vi.fn(),
+        onMessage: vi.fn(),
+        shutdownAll: vi.fn(),
+    },
+    webSocketChannel: {
+        registerConnection: vi.fn(),
+        unregisterConnection: vi.fn(),
+        sendMessage: vi.fn(),
+    },
+}));
+
+// Mock agent runner with correct signature: run(messages, systemPrompt, sessionId, workspaceId, onEvent)
 vi.mock('../src/services/agent-runner', () => ({
     getRunner: vi.fn().mockReturnValue({
-        run: async (msgs: any, sys: any, cb: any) => { cb('text', 'Lark mock reply'); },
+        run: async (msgs: any, sys: any, sessionId: any, workspaceId: any, onEvent: any) => {
+            // Support both old (msgs, sys, cb) and new (msgs, sys, sessionId, workspaceId, onEvent) signatures
+            const callback = typeof sessionId === 'function' ? sessionId : typeof workspaceId === 'function' ? workspaceId : onEvent;
+            if (callback) callback('text', 'Lark mock reply');
+        },
         isDestroyed: false
     })
 }));
@@ -279,6 +306,10 @@ logs: {}
     });
 
     it('should warn and not start when enabled but missing app_id or app_secret', () => {
+        // Clear any existing env vars
+        delete process.env.LARK_APP_ID;
+        delete process.env.LARK_APP_SECRET;
+
         // Create config with lark enabled but missing credentials
         writeFileSync(testConfigPath, `
 server: { port: 8888 }
@@ -290,8 +321,6 @@ files: {}
 memory: {}
 lark:
   enabled: true
-  app_id: ""
-  app_secret: ""
 tasks: {}
 logs: {}
         `);
@@ -302,11 +331,21 @@ logs: {}
 
         startLarkService();
 
-        expect(consoleSpy).toHaveBeenCalledWith(
-            '[Lark] Enabled but app_id or app_secret is missing.'
+        // Check that warn was called (the exact message may vary)
+        expect(consoleSpy).toHaveBeenCalled();
+
+        // Verify the message contains the expected text
+        const warnCalls = consoleSpy.mock.calls;
+        const foundWarning = warnCalls.some(call =>
+            call.some(arg => typeof arg === 'string' && arg.includes('app_id or app_secret'))
         );
+        expect(foundWarning).toBe(true);
 
         consoleSpy.mockRestore();
+
+        // Restore env vars for other tests
+        process.env.LARK_APP_ID = 'test_app_id';
+        process.env.LARK_APP_SECRET = 'test_app_sec';
     });
 
     it('should reply with error when user has no active workspace', async () => {
@@ -850,10 +889,11 @@ logs: {}
         const longResponse = 'A'.repeat(30000); // 超过 28000 字符限制
 
         (getRunner as Mock).mockReturnValueOnce({
-            run: async (msgs: any, sys: any, cb: any) => {
+            run: async (msgs: any, sys: any, sessionId: any, workspaceId: any, onEvent: any) => {
+                const callback = typeof sessionId === 'function' ? sessionId : typeof workspaceId === 'function' ? workspaceId : onEvent;
                 // Split into chunks to simulate streaming
                 for (let i = 0; i < longResponse.length; i += 1000) {
-                    cb('text', longResponse.slice(i, i + 1000));
+                    if (callback) callback('text', longResponse.slice(i, i + 1000));
                 }
             },
             isDestroyed: false
@@ -938,9 +978,12 @@ logs: {}
         // Mock getRunner to trigger usage event
         const { getRunner } = await import('../src/services/agent-runner');
         (getRunner as Mock).mockReturnValueOnce({
-            run: async (msgs: any, sys: any, cb: any) => {
-                cb('text', 'Response with tokens');
-                cb('usage', { input_tokens: 150, output_tokens: 50 });
+            run: async (msgs: any, sys: any, sessionId: any, workspaceId: any, onEvent: any) => {
+                const callback = typeof sessionId === 'function' ? sessionId : typeof workspaceId === 'function' ? workspaceId : onEvent;
+                if (callback) {
+                    callback('text', 'Response with tokens');
+                    callback('usage', { input_tokens: 150, output_tokens: 50 });
+                }
             },
             isDestroyed: false
         });

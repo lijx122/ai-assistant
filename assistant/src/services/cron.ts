@@ -15,6 +15,9 @@ const execAsync = promisify(exec);
 // 正在运行的定时任务 Map: taskId -> ScheduledTask
 const scheduledTasks = new Map<string, ScheduledTask>();
 
+// 运行中任务锁（进程内）：taskId -> running
+const runningTaskIds = new Set<string>();
+
 // 任务定义
 interface Task {
     id: string;
@@ -32,6 +35,7 @@ interface Task {
     next_run: number | null;
     run_count: number;
     fail_count: number;
+    isRunning?: boolean;
 }
 
 // 执行记录
@@ -115,7 +119,17 @@ export function registerTask(task: Task): void {
     }
 
     const scheduledTask = schedule(cronExpression, async () => {
-        await executeTask(task);
+        if (runningTaskIds.has(task.id)) {
+            console.warn(`[Cron] Task ${task.id} already running, skipping`);
+            return;
+        }
+
+        runningTaskIds.add(task.id);
+        try {
+            await executeTask(task);
+        } finally {
+            runningTaskIds.delete(task.id);
+        }
     }, {
         timezone: 'Asia/Shanghai',
     });
@@ -133,6 +147,7 @@ export function unregisterTask(taskId: string): void {
         existing.stop();
         scheduledTasks.delete(taskId);
     }
+    runningTaskIds.delete(taskId);
 }
 
 /**
@@ -492,7 +507,16 @@ export async function triggerTask(taskId: string): Promise<void> {
         throw new Error(`Task not found: ${taskId}`);
     }
 
-    await executeTask(task);
+    if (runningTaskIds.has(task.id)) {
+        throw new Error(`Task already running: ${taskId}`);
+    }
+
+    runningTaskIds.add(task.id);
+    try {
+        await executeTask(task);
+    } finally {
+        runningTaskIds.delete(task.id);
+    }
 }
 
 /**

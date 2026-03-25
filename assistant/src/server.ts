@@ -4,6 +4,7 @@ import { serveStatic } from '@hono/node-server/serve-static';
 import { logger } from 'hono/logger';
 import { cors } from 'hono/cors';
 import { createNodeWebSocket } from '@hono/node-ws';
+import { readFileSync } from 'fs';
 import { getConfig, loadConfig } from './config';
 import { initDb } from './db';
 import { authRouter } from './routes/auth';
@@ -375,8 +376,17 @@ app.get('/ws/logs', upgradeWebSocket((c) => {
 // Base heartbeat
 app.get('/health', (c) => c.json({ status: 'ok', timestamp: Date.now() }));
 
-// Static files - serve index.html for root path
-app.use('/*', serveStatic({ root: './web', index: 'index.html' }));
+// Static files - serve Vue build output
+app.use('/*', serveStatic({ root: './web-vue-dist', index: 'index.html' }));
+
+// SPA fallback - for Vue Router, return index.html for non-API routes
+app.get('*', (c) => {
+    // Skip API and WebSocket routes
+    if (c.req.path.startsWith('/api/') || c.req.path.startsWith('/ws/')) {
+        return c.notFound();
+    }
+    return c.html(readFileSync('./web-vue-dist/index.html', 'utf-8'));
+});
 
 const port = config.server.port;
 const hostname = config.server.host;

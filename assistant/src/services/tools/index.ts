@@ -64,6 +64,7 @@ export { recallTool, recallToolDefinition, executeRecall } from './recall';
 export { claudeCodeTool, claudeCodeToolDefinition, executeClaudeCode } from './claude-code';
 export { readWorkspaceMemoryTool, readImpressionTool, readWorkspaceMemoryDefinition, readImpressionDefinition } from './memory-tools';
 export { noteWriteTool, noteReadTool, noteSearchTool, noteWriteToolDefinition, noteReadToolDefinition, noteSearchToolDefinition } from './note';
+export { reminderSetTool, reminderSetToolDefinition } from './reminder';
 
 import { registerTools } from './registry';
 import { bashTool } from './bash';
@@ -77,6 +78,7 @@ import { readWorkspaceMemoryTool, readImpressionTool } from './memory-tools';
 import { webSearchTool } from './web-search';
 import { webFetchTool } from './web-fetch';
 import { noteWriteTool, noteReadTool, noteSearchTool } from './note';
+import { reminderSetTool } from './reminder';
 
 /**
  * 注册所有标准工具
@@ -101,6 +103,7 @@ export function registerAllTools(): void {
         noteWriteTool,
         noteReadTool,
         noteSearchTool,
+        reminderSetTool,
     ]);
     console.log('[Tools] All standard tools registered');
 }

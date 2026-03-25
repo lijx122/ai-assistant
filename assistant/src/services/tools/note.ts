@@ -6,7 +6,7 @@
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
-import { resolve, join } from 'path';
+import { join } from 'path';
 import { getDb } from '../../db';
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 
@@ -134,22 +134,26 @@ function sanitizeFilename(title: string): string {
  */
 export const noteWriteToolDefinition: ToolDefinition = {
     name: 'note_write',
-    description: '在工作区创建或更新笔记。自动管理 frontmatter（tags、创建时间、更新时间）。如果笔记已存在则更新内容，保留原有创建时间。',
+    description: '写入或更新笔记。笔记保存在工作区 .notes/ 目录下。适用于：记录重要信息、保存代码片段、记录会议内容。',
     input_schema: {
         type: 'object',
         properties: {
             title: {
                 type: 'string',
-                description: '笔记标题，会作为文件名（自动清理非法字符）',
+                description: '笔记标题（同时作为文件名）',
             },
             content: {
                 type: 'string',
-                description: '笔记正文内容（不含 frontmatter，会自动添加）',
+                description: '笔记内容（Markdown格式）',
+            },
+            append: {
+                type: 'boolean',
+                description: 'true 则追加，false 则覆盖（默认 false）',
             },
             tags: {
                 type: 'array',
                 items: { type: 'string' },
-                description: '可选的标签数组，如 ["重要", "待办"]',
+                description: '可选标签数组，默认保留已有标签',
             },
         },
         required: ['title', 'content'],
@@ -161,13 +165,13 @@ export const noteWriteToolDefinition: ToolDefinition = {
  */
 export const noteReadToolDefinition: ToolDefinition = {
     name: 'note_read',
-    description: '读取工作区内的笔记。返回笔记的完整内容，包括解析后的 frontmatter 和正文。',
+    description: '读取指定笔记内容。',
     input_schema: {
         type: 'object',
         properties: {
             title: {
                 type: 'string',
-                description: '笔记标题，对应 .notes/{title}.md 文件',
+                description: '笔记标题',
             },
         },
         required: ['title'],
@@ -179,13 +183,13 @@ export const noteReadToolDefinition: ToolDefinition = {
  */
 export const noteSearchToolDefinition: ToolDefinition = {
     name: 'note_search',
-    description: '在工作区笔记目录中全文搜索。搜索标题、tags 和内容，返回匹配的笔记列表。',
+    description: '搜索笔记内容。在所有笔记中全文搜索关键词。',
     input_schema: {
         type: 'object',
         properties: {
             query: {
                 type: 'string',
-                description: '搜索关键词，不区分大小写',
+                description: '搜索关键词',
             },
             limit: {
                 type: 'number',
@@ -200,11 +204,11 @@ export const noteSearchToolDefinition: ToolDefinition = {
  * 执行写入笔记
  */
 export function executeNoteWrite(
-    input: { title: string; content: string; tags?: string[] },
+    input: { title: string; content: string; append?: boolean; tags?: string[] },
     context: ToolContext
 ): ToolResult {
     const startTime = Date.now();
-    const { title, content, tags = [] } = input;
+    const { title, content, append = false, tags } = input;
     const { workspaceId } = context;
 
     const ws = getWorkspaceRoot(workspaceId);
@@ -219,46 +223,54 @@ export function executeNoteWrite(
 
     const now = new Date().toISOString();
     let createdAt = now;
+    let existingBody = '';
+    let existingTags: string[] = [];
 
-    // 检查是否已存在
     const existed = existsSync(notePath);
     if (existed) {
         try {
             const existingContent = readFileSync(notePath, 'utf8');
             const parsed = parseFrontmatter(existingContent);
+            existingBody = parsed.body || '';
             if (parsed.frontmatter?.created_at) {
                 createdAt = parsed.frontmatter.created_at;
             }
-        } catch (e) {
-            // 解析失败，使用新的创建时间
+            if (Array.isArray(parsed.frontmatter?.tags)) {
+                existingTags = parsed.frontmatter.tags;
+            }
+        } catch {
+            // ignore parse errors and overwrite with new metadata
         }
     }
 
+    const mergedContent = append && existed
+        ? `${existingBody}${existingBody.endsWith('\n') || content.startsWith('\n') ? '' : '\n'}${content}`
+        : content;
+
+    const finalTags = Array.isArray(tags) ? tags : existingTags;
+
     const frontmatter: NoteFrontmatter = {
         title,
-        tags,
+        tags: finalTags,
         created_at: createdAt,
         updated_at: now,
     };
 
-    const fullContent = generateFrontmatter(frontmatter) + content;
+    const fullContent = generateFrontmatter(frontmatter) + mergedContent;
 
     try {
         writeFileSync(notePath, fullContent, 'utf8');
 
-        console.log(`[NoteTool] ${existed ? 'Updated' : 'Created'}: ${title} (${filename}.md)`);
+        const action: 'created' | 'updated' | 'appended' = !existed ? 'created' : append ? 'appended' : 'updated';
 
         return {
             success: true,
             data: {
                 title,
-                filename: `${filename}.md`,
-                created: !existed,
-                updated: existed,
-                tags,
-                created_at: createdAt,
+                path: notePath,
+                action,
+                content_length: mergedContent.length,
                 updated_at: now,
-                content_length: content.length,
             },
             elapsed_ms: Date.now() - startTime,
         };
@@ -311,12 +323,8 @@ export function executeNoteRead(
             success: true,
             data: {
                 title,
-                filename: `${filename}.md`,
-                frontmatter: parsed.frontmatter,
                 content: displayBody,
-                full_content: truncated ? undefined : fullContent,
-                size: fullContent.length,
-                truncated,
+                updatedAt: parsed.frontmatter?.updated_at || new Date(statSync(notePath).mtimeMs).toISOString(),
             },
             truncated,
             elapsed_ms: Date.now() - startTime,
@@ -363,12 +371,9 @@ export function executeNoteSearch(
     const searchTerm = query.toLowerCase();
     const results: Array<{
         title: string;
-        filename: string;
-        tags: string[];
-        created_at: string;
+        excerpt: string;
+        path: string;
         updated_at: string;
-        matched_in: ('title' | 'tags' | 'content')[];
-        preview: string;
     }> = [];
 
     try {
@@ -421,12 +426,9 @@ export function executeNoteSearch(
 
                 results.push({
                     title,
-                    filename,
-                    tags,
-                    created_at: parsed.frontmatter?.created_at || '',
-                    updated_at: parsed.frontmatter?.updated_at || '',
-                    matched_in: matchedIn,
-                    preview,
+                    excerpt: preview,
+                    path: filePath,
+                    updated_at: parsed.frontmatter?.updated_at || new Date(stat.mtimeMs).toISOString(),
                 });
 
                 if (results.length >= limit) break;
@@ -443,7 +445,7 @@ export function executeNoteSearch(
             success: true,
             data: {
                 query,
-                results,
+                results: results.map(({ title, excerpt, path }) => ({ title, excerpt, path })),
                 total: results.length,
             },
             elapsed_ms: Date.now() - startTime,

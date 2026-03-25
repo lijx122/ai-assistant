@@ -20,7 +20,7 @@ claude:
     threshold_ratio: 0.85   # 超过 max_tokens × 0.85 时触发（与 token_limit 同时满足）
     token_limit: 40000      # estimated tokens 超过此值才触发
     preserve_rounds: 4
-    summary_model: "claude-haiku-4-5-20251001"
+    summary_model: "claude-haiku-4-5"
     max_summary_tokens: 800
 
 runner:
@@ -60,7 +60,7 @@ logs:
 ops:
   alert:
     max_fix_attempts: 3
-    model: "claude-haiku-4-5-20251001"
+    model: "claude-haiku-4-5"
 
 memory:
   workspace:
