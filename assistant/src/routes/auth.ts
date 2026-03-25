@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import { timingSafeEqual } from 'crypto';
+import { compare, hashSync } from 'bcrypt';
 import { createToken, authMiddleware, COOKIE_NAME } from '../middleware/auth';
 import { getConfig } from '../config';
 import { AuthContext } from '../types';
@@ -9,12 +10,22 @@ export const authRouter = new Hono<{ Variables: { user: AuthContext } }>();
 
 // ip -> { count, expireAt }
 export const rateLimitMap = new Map<string, { count: number, expireAt: number }>();
+let cachedPasswordSource = '';
+let cachedPasswordHash = '';
 
 function safeEqual(a: string, b: string): boolean {
     const aBuf = Buffer.from(a);
     const bBuf = Buffer.from(b);
     if (aBuf.length !== bBuf.length) return false;
     return timingSafeEqual(aBuf, bBuf);
+}
+
+function getPasswordHash(plainPassword: string): string {
+    if (!cachedPasswordHash || cachedPasswordSource !== plainPassword) {
+        cachedPasswordSource = plainPassword;
+        cachedPasswordHash = hashSync(plainPassword, 12);
+    }
+    return cachedPasswordHash;
 }
 
 authRouter.post('/login', async (c) => {
@@ -44,7 +55,10 @@ authRouter.post('/login', async (c) => {
     const expectedPassword = config.auth.bootstrap_password;
     const expectedRole = config.auth.bootstrap_role;
 
-    if (!safeEqual(String(username), expectedUsername) || !safeEqual(String(password), expectedPassword)) {
+    const usernameMatched = safeEqual(String(username), expectedUsername);
+    const passwordMatched = await compare(String(password), getPasswordHash(expectedPassword)).catch(() => false);
+
+    if (!usernameMatched || !passwordMatched) {
         limit.count++;
         rateLimitMap.set(ip, limit);
         return c.json({ error: 'Invalid credentials' }, 401);

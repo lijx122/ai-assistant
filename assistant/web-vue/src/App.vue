@@ -13,13 +13,13 @@
       </div>
       <div>
         <p class="text-[10px] font-mono opacity-40 mb-1.5">用户名</p>
-        <input v-model="loginUser" type="text"
+        <input v-model="loginUser" type="text" autocomplete="off"
           class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100
                  text-sm font-mono outline-none focus:border-oxygen-blue/40"/>
       </div>
       <div>
         <p class="text-[10px] font-mono opacity-40 mb-1.5">密码</p>
-        <input v-model="loginPass" type="password"
+        <input v-model="loginPass" type="password" autocomplete="new-password"
           @keydown.enter="doLogin"
           class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100
                  text-sm font-mono outline-none focus:border-oxygen-blue/40"/>
@@ -352,8 +352,8 @@ const PlaceholderView = markRaw({
 const store = useAppStore()
 const currentView = ref('intelligence')
 const wsPickerOpen = ref(false)
-const loginUser = ref('admin')
-const loginPass = ref('changeme')
+const loginUser = ref('')
+const loginPass = ref('')
 const loginErr = ref('')
 const showNewWsInput = ref(false)
 const newWsName = ref('')
