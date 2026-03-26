@@ -42,7 +42,7 @@ terminalRouter.post('/', async (c) => {
     }
 
     try {
-        const session = createTerminal(workspaceId, user.userId, cwd, title);
+        const session = await createTerminal(workspaceId, user.userId, cwd, title);
 
         return c.json({
             success: true,
@@ -60,6 +60,10 @@ terminalRouter.post('/', async (c) => {
 
         if (err.message?.includes('Maximum terminal sessions')) {
             return c.json({ error: err.message }, 429);
+        }
+
+        if (err.message?.includes('not available')) {
+            return c.json({ error: err.message, code: 'PTY_UNAVAILABLE' }, 503);
         }
 
         return c.json({ error: 'Failed to create terminal', message: err.message }, 500);

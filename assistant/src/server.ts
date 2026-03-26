@@ -28,7 +28,7 @@ import { startSessionWatcher, stopSessionWatcher } from './services/session-watc
 import { channelManager, ChannelMessage } from './channels';
 import { preload as preloadEmbedder } from './services/embedder';
 import { backfillEmbeddings } from './services/message-indexer';
-import { getTerminal, writeToTerminal, onTerminalData, touchTerminal, markTerminalConnected, markTerminalDisconnected, startStaleTerminalCleanup, getTerminalOutputBuffer } from './services/terminal';
+import { getTerminal, writeToTerminal, onTerminalData, touchTerminal, markTerminalConnected, markTerminalDisconnected, startStaleTerminalCleanup, getTerminalOutputBuffer, initializeTerminal } from './services/terminal';
 import { larkChannel, webSocketChannel } from './channels';
 import { getDb } from './db';
 import { logger as appLogger } from './services/logger';
@@ -422,6 +422,9 @@ if (process.env.NODE_ENV !== 'test') {
 
         // 启动旧版飞书服务（兼容层，逐步迁移）
         startLarkService();
+
+        // 异步初始化终端服务（不阻塞启动）
+        initializeTerminal().catch(err => console.warn('[Terminal] Init error:', err));
 
         // 启动终端超时清理定时器
         startStaleTerminalCleanup();

@@ -10,39 +10,76 @@
  */
 
 import { execSync } from 'child_process';
+import { spawn, IPty } from 'node-pty';
+import { randomUUID } from 'crypto';
+import { getDb } from '../db';
+import { getConfig } from '../config';
+import { mkdirSync, existsSync } from 'fs';
 
-// ========== 运行时架构兼容性校验 ==========
-function checkPtyCompatibility() {
+// ========== 运行时架构兼容性校验（异步惰性检查）==========
+let ptyCompatibilityChecked = false;
+let ptyAvailable = true;
+
+/**
+ * 异步检查 PTY 兼容性（惰性执行，首次使用时触发）
+ * 不再阻塞模块加载，仅告警不退出
+ */
+async function checkPtyCompatibilityAsync(): Promise<boolean> {
+  if (ptyCompatibilityChecked) {
+    return ptyAvailable;
+  }
+  ptyCompatibilityChecked = true;
+
   try {
     require('node-pty');
+    ptyAvailable = true;
+    console.log('[pty] node-pty 兼容性检查通过');
+    return true;
   } catch (e: any) {
     if (e.message?.includes('wrong ELF') || e.message?.includes('mach-o') || e.message?.includes('architecture')) {
-      console.warn('[pty] 架构不匹配，尝试自动重新编译…');
+      console.warn('[pty] ⚠️ 架构不匹配，尝试自动重新编译…');
       console.warn('[pty] 错误信息:', e.message);
       try {
         execSync('npm rebuild node-pty', {
           stdio: 'inherit',
           cwd: process.cwd()
         });
-        console.log('[pty] 重新编译成功，请重启服务');
+        console.log('[pty] ✅ 重新编译成功，node-pty 已可用');
+        ptyAvailable = true;
+        return true;
       } catch (rebuildErr: any) {
-        console.error('[pty] 自动编译失败:', rebuildErr.message);
-        console.error('[pty] 请手动执行: npm rebuild node-pty');
+        console.warn('[pty] ⚠️ 自动编译失败，请手动执行: npm rebuild node-pty');
+        console.warn('[pty] 终端功能暂时不可用，但服务可以继续运行');
+        ptyAvailable = false;
+        return false;
       }
-      process.exit(1);
     }
-    throw e;
+    console.warn('[pty] ⚠️ node-pty 加载失败:', e.message);
+    console.warn('[pty] 终端功能暂时不可用，但服务可以继续运行');
+    ptyAvailable = false;
+    return false;
   }
 }
 
-checkPtyCompatibility();
-// ========== 兼容性校验结束 ==========
+/**
+ * 异步初始化终端服务（供 server.ts 启动时调用）
+ */
+export async function initializeTerminal(): Promise<void> {
+  console.log('[Terminal] 正在初始化终端服务…');
+  const available = await checkPtyCompatibilityAsync();
+  if (available) {
+    console.log('[Terminal] ✅ 终端服务初始化完成');
+  } else {
+    console.warn('[Terminal] ⚠️ 终端服务初始化失败，终端功能不可用');
+  }
+}
 
-import { spawn, IPty } from 'node-pty';
-import { randomUUID } from 'crypto';
-import { getDb } from '../db';
-import { getConfig } from '../config';
-import { mkdirSync, existsSync } from 'fs';
+/**
+ * 检查 PTY 是否可用（惰性）
+ */
+export function isPtyAvailable(): boolean {
+  return ptyAvailable;
+}
 
 export interface TerminalSession {
     id: string;
@@ -108,14 +145,22 @@ export function getActiveSessionCount(): number {
 }
 
 /**
- * 创建新的 PTY 会话
+ * 创建新的 PTY 会话（惰性检查 PTY 可用性）
  */
-export function createTerminal(
+export async function createTerminal(
     workspaceId: string,
     userId: string,
     cwd?: string,
     title?: string
-): TerminalSession {
+): Promise<TerminalSession> {
+    // 首次使用时惰性检查 PTY 可用性
+    if (!ptyCompatibilityChecked) {
+      await checkPtyCompatibilityAsync();
+    }
+
+    if (!ptyAvailable) {
+        throw new Error('Terminal is not available. node-pty failed to load. Please run: npm rebuild node-pty');
+    }
     const config = getConfig();
 
     // 检查会话上限
