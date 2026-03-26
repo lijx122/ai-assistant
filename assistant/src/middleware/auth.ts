@@ -8,18 +8,25 @@ export const COOKIE_NAME = 'assistant_token';
 type JoseModule = typeof import('jose');
 let joseModulePromise: Promise<JoseModule> | null = null;
 
-function importModule<T>(specifier: string): Promise<T> {
-    // Vitest 运行在模块沙箱内，new Function(import) 可能缺少回调导致失败
-    if (process.env.VITEST) {
-        return import(specifier) as Promise<T>;
+/**
+ * 动态模块白名单
+ * 替换 new Function('s', 'return import(s)') 避免动态代码执行风险
+ */
+const moduleRegistry: Record<string, () => Promise<any>> = {
+    'jose': () => import('jose'),
+};
+
+function loadModule<T>(specifier: string): Promise<T> {
+    const loader = moduleRegistry[specifier];
+    if (!loader) {
+        return Promise.reject(new Error(`Module '${specifier}' is not in the whitelist`));
     }
-    const dynamicImport = new Function('s', 'return import(s)') as (s: string) => Promise<T>;
-    return dynamicImport(specifier);
+    return loader() as Promise<T>;
 }
 
 function loadJose(): Promise<JoseModule> {
     if (!joseModulePromise) {
-        joseModulePromise = importModule<JoseModule>('jose');
+        joseModulePromise = loadModule<JoseModule>('jose');
     }
     return joseModulePromise;
 }
