@@ -280,6 +280,14 @@ const migrations: Migration[] = [
                 ON logs(category, timestamp DESC);
         `,
     },
+    {
+        version: 17,
+        name: 'add_terminal_sessions_disconnected_index',
+        sql: `
+            CREATE INDEX IF NOT EXISTS idx_terminal_sessions_disconnected
+                ON terminal_sessions(disconnected_at);
+        `,
+    },
 ];
 
 /**
