@@ -29,6 +29,7 @@ import { channelManager, ChannelMessage } from './channels';
 import { preload as preloadEmbedder } from './services/embedder';
 import { backfillEmbeddings } from './services/message-indexer';
 import { getTerminal, writeToTerminal, onTerminalData, touchTerminal, markTerminalConnected, markTerminalDisconnected, startStaleTerminalCleanup, getTerminalOutputBuffer, initializeTerminal } from './services/terminal';
+import { cleanupDestroyedRunners } from './services/agent-runner';
 import { larkChannel, webSocketChannel } from './channels';
 import { getDb } from './db';
 import { logger as appLogger } from './services/logger';
@@ -459,6 +460,13 @@ if (process.env.NODE_ENV !== 'test') {
 
         // 启动终端超时清理定时器
         startStaleTerminalCleanup();
+
+        // T-DB-TD012: 定时清理已销毁的 AgentRunner，防止 Map 无限增长
+        const RUNNER_CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 分钟
+        setInterval(() => {
+            cleanupDestroyedRunners();
+        }, RUNNER_CLEANUP_INTERVAL_MS);
+        console.log(`[Server] Runner cleanup scheduled every ${RUNNER_CLEANUP_INTERVAL_MS / 1000 / 60} minutes`);
 
         // 启动自动归档服务
         startAutoArchive();

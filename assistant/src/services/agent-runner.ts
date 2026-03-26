@@ -539,6 +539,24 @@ export const getRunner = (workspaceId: string, onEvent: AgentStreamCallback): Ag
     return runner;
 };
 
+/**
+ * 清理已销毁的 runner，防止 Map 无限增长
+ * 可由外部定时调用或在 getRunner 时惰性调用
+ */
+export const cleanupDestroyedRunners = (): number => {
+    let cleanedCount = 0;
+    for (const [workspaceId, runner] of runners.entries()) {
+        if (runner['isDestroyed']) {
+            runners.delete(workspaceId);
+            cleanedCount++;
+        }
+    }
+    if (cleanedCount > 0) {
+        console.log(`[AgentRunner] Cleaned up ${cleanedCount} destroyed runner(s)`);
+    }
+    return cleanedCount;
+};
+
 export const clearRunners = () => {
     for (const runner of runners.values()) {
         runner.destroy();
