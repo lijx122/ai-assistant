@@ -12,6 +12,21 @@ export const authRouter = new Hono<{ Variables: { user: AuthContext } }>();
 // ip -> { count, expireAt }
 export const rateLimitMap = new Map<string, { count: number, expireAt: number }>();
 
+/**
+ * 清理过期的 rate limit 条目（惰性清理）
+ */
+export function cleanupExpiredRateLimits(): number {
+    const now = Date.now();
+    let cleanedCount = 0;
+    for (const [ip, limit] of rateLimitMap.entries()) {
+        if (now >= limit.expireAt) {
+            rateLimitMap.delete(ip);
+            cleanedCount++;
+        }
+    }
+    return cleanedCount;
+}
+
 function safeEqual(a: string, b: string): boolean {
     const aBuf = Buffer.from(a);
     const bBuf = Buffer.from(b);
@@ -23,6 +38,9 @@ authRouter.post('/login', async (c) => {
     const ip = c.req.header('x-real-ip') || c.req.header('x-forwarded-for') || '127.0.0.1';
     const now = Date.now();
     const config = getConfig();
+
+    // 惰性清理过期的 rate limit 条目
+    cleanupExpiredRateLimits();
 
     let limit = rateLimitMap.get(ip);
     if (limit && now < limit.expireAt) {
@@ -64,6 +82,7 @@ authRouter.post('/login', async (c) => {
     const token = await createToken(user!.username, user!.role);
     setCookie(c, COOKIE_NAME, token, {
         httpOnly: true,
+        secure: config.auth.cookie_secure,
         maxAge: config.auth.token_expire_days * 24 * 60 * 60,
         path: '/',
         sameSite: 'Lax',

@@ -14,6 +14,23 @@ import { randomUUID } from 'crypto';
  * 4. 压缩结果持久化到 session_compacts 表，重启后可复用
  */
 
+/**
+ * Anthropic 客户端单例（用于摘要任务）
+ * 复用客户端以减少连接开销
+ */
+let anthropicClient: Anthropic | null = null;
+
+export function getAnthropicClient(): Anthropic {
+    if (!anthropicClient) {
+        const config = getConfig();
+        anthropicClient = new Anthropic({
+            apiKey: config.anthropicApiKey,
+            baseURL: config.anthropicBaseUrl,
+        });
+    }
+    return anthropicClient;
+}
+
 /** 压缩事件回调类型 */
 export type CompactEventCallback = (event: 'compact_start' | 'compact_done', payload: any) => void;
 
@@ -124,11 +141,8 @@ export async function summarize(
     const config = getConfig();
     const compactConfig = config.claude.compact;
 
-    // 创建独立的 anthropic 客户端（用于摘要）
-    const anthropic = new Anthropic({
-        apiKey: config.anthropicApiKey,
-        baseURL: config.anthropicBaseUrl,
-    });
+    // 复用单例客户端（减少连接开销）
+    const anthropic = getAnthropicClient();
 
     const formattedMessages = formatForSummary(messages);
 

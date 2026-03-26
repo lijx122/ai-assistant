@@ -69,6 +69,8 @@ const ConfigSchema = z.object({
     auth: z.object({
         token_expire_days: z.number().default(7),
         login_rate_limit: z.number().default(5),
+        // Cookie secure 标志（HTTPS 环境设为 true）
+        cookie_secure: z.boolean().default(false),
         // 登录账号（仅从环境变量读取）
         bootstrap_username: z.string().min(1).default(() => process.env.AUTH_USERNAME || ''),
         // 登录密码（仅从环境变量读取）
