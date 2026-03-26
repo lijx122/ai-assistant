@@ -270,6 +270,17 @@
           @keydown="handleKeydown"
           @input="autoResize">
         </textarea>
+        <!-- 深度研究开关 -->
+        <button @click="toggleDeepResearch"
+          :class="['shrink-0 mb-3 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px]',
+                   'font-mono transition-all border',
+                   deepResearchMode
+                     ? 'bg-oxygen-blue text-white border-oxygen-blue shadow-sm shadow-oxygen-blue/20'
+                     : 'border-slate-200 text-slate-400 hover:border-slate-300']"
+          title="深度研究模式：多轮搜索确保信息全面">
+          <Telescope class="w-3.5 h-3.5"/>
+          <span>{{ deepResearchMode ? '深研中' : '深度研究' }}</span>
+        </button>
         <div class="flex items-center gap-1 opacity-30 shrink-0 mb-3">
           <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">
             ⌘</kbd>
@@ -343,7 +354,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -360,6 +371,7 @@ const isSessionsLoading = ref(true)
 const isTodoLoading = ref(true)
 const messagePaneKey = ref(0)
 const expandedToolBlocks = ref({})
+const deepResearchMode = ref(false)
 let ws = null
 let currentMsgId = null
 
@@ -611,7 +623,7 @@ function renderMarkdown(text) {
 let isSending = false
 
 async function sendMessage() {
-  const text = inputText.value.trim()
+  let text = inputText.value.trim()
   if (!text || store.isStreaming || isSending) return
   if (!store.currentSession) {
     await newSession()
@@ -621,6 +633,11 @@ async function sendMessage() {
   inputText.value = ''
   if (inputEl.value) {
     inputEl.value.style.height = 'auto'
+  }
+
+  // 深度研究模式：注入工具调用指令
+  if (deepResearchMode.value) {
+    text = `请使用 deep_research 工具研究以下主题，然后基于返回的真实数据生成完整报告：\n\n${text}`
   }
 
   // 乐观更新：立即显示用户消息
@@ -649,6 +666,10 @@ async function sendMessage() {
   } finally {
     isSending = false
   }
+}
+
+function toggleDeepResearch() {
+  deepResearchMode.value = !deepResearchMode.value
 }
 
 function handleKeydown(e) {

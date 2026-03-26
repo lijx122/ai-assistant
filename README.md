@@ -94,6 +94,15 @@
 
 ---
 
+## 目录与依赖规范
+
+1. 根目录（项目整体目录）统一维护仓库级文档与规则：`README.md`、`.gitignore`。
+2. `assistant/` 是主项目子目录，后端与前端依赖统一在 `assistant/package.json` 管理。
+3. `assistant/web-vue/` 仅存放 Vue 源码与 Vite 配置，不再维护独立的 `package.json` / `package-lock.json`。
+4. 用户本地编程目录（如 `.claude`、`.vscode`）属于个人环境文件，统一忽略，不提交到 Git。
+
+---
+
 ## 快速开始
 
 ### 1. 克隆与进入目录
@@ -173,6 +182,8 @@ npm run test         # 运行测试（Vitest）
 npm run rebuild:pty  # 迁移机器后重编译 node-pty
 ```
 
+说明：以上命令均在 `assistant/` 目录执行。
+
 ---
 
 ## 配置说明
@@ -216,6 +227,8 @@ MODEL_AGENT=claude-sonnet-4-6
 
 ```
 .
+├── README.md           # 仓库级说明文档（唯一）
+├── .gitignore          # 仓库级忽略规则（唯一）
 ├── assistant/           # 主项目
 │   ├── src/
 │   │   ├── server.ts           # HTTP + WebSocket 服务

@@ -63,6 +63,9 @@ export { createTaskTool, createTaskToolDefinition, executeCreateTask } from './t
 export { recallTool, recallToolDefinition, executeRecall } from './recall';
 export { claudeCodeTool, claudeCodeToolDefinition, executeClaudeCode } from './claude-code';
 export { readWorkspaceMemoryTool, readImpressionTool, readWorkspaceMemoryDefinition, readImpressionDefinition } from './memory-tools';
+export { webSearchTool, webSearchToolDefinition, executeWebSearch } from './web-search';
+export { webFetchTool, webFetchToolDefinition, executeWebFetch } from './web-fetch';
+export { deepResearchTool, deepResearchToolDefinition, executeDeepResearch } from './deep-research';
 export { noteWriteTool, noteReadTool, noteSearchTool, noteWriteToolDefinition, noteReadToolDefinition, noteSearchToolDefinition } from './note';
 export { reminderSetTool, reminderSetToolDefinition } from './reminder';
 
@@ -77,6 +80,7 @@ import { claudeCodeTool } from './claude-code';
 import { readWorkspaceMemoryTool, readImpressionTool } from './memory-tools';
 import { webSearchTool } from './web-search';
 import { webFetchTool } from './web-fetch';
+import { deepResearchTool } from './deep-research';
 import { noteWriteTool, noteReadTool, noteSearchTool } from './note';
 import { reminderSetTool } from './reminder';
 
@@ -100,6 +104,7 @@ export function registerAllTools(): void {
         readImpressionTool,
         webSearchTool,
         webFetchTool,
+        deepResearchTool,
         noteWriteTool,
         noteReadTool,
         noteSearchTool,
