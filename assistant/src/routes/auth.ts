@@ -1,31 +1,22 @@
 import { Hono } from 'hono';
 import { setCookie, deleteCookie } from 'hono/cookie';
 import { timingSafeEqual } from 'crypto';
-import { compare, hashSync } from 'bcrypt';
+import { compare } from 'bcrypt';
 import { createToken, authMiddleware, COOKIE_NAME } from '../middleware/auth';
 import { getConfig } from '../config';
 import { AuthContext } from '../types';
+import { getDb } from '../db';
 
 export const authRouter = new Hono<{ Variables: { user: AuthContext } }>();
 
 // ip -> { count, expireAt }
 export const rateLimitMap = new Map<string, { count: number, expireAt: number }>();
-let cachedPasswordSource = '';
-let cachedPasswordHash = '';
 
 function safeEqual(a: string, b: string): boolean {
     const aBuf = Buffer.from(a);
     const bBuf = Buffer.from(b);
     if (aBuf.length !== bBuf.length) return false;
     return timingSafeEqual(aBuf, bBuf);
-}
-
-function getPasswordHash(plainPassword: string): string {
-    if (!cachedPasswordHash || cachedPasswordSource !== plainPassword) {
-        cachedPasswordSource = plainPassword;
-        cachedPasswordHash = hashSync(plainPassword, 12);
-    }
-    return cachedPasswordHash;
 }
 
 authRouter.post('/login', async (c) => {
@@ -51,12 +42,15 @@ authRouter.post('/login', async (c) => {
         return c.json({ error: 'Missing credentials' }, 400);
     }
 
-    const expectedUsername = config.auth.bootstrap_username;
-    const expectedPassword = config.auth.bootstrap_password;
-    const expectedRole = config.auth.bootstrap_role;
+    const db = getDb();
 
-    const usernameMatched = safeEqual(String(username), expectedUsername);
-    const passwordMatched = await compare(String(password), getPasswordHash(expectedPassword)).catch(() => false);
+    // 从 DB 读取用户及其 password_hash
+    const user = db.prepare(
+        'SELECT username, password_hash, role FROM users WHERE username = ?'
+    ).get(username) as { username: string; password_hash: string; role: string } | undefined;
+
+    const usernameMatched = user && safeEqual(String(username), user.username);
+    const passwordMatched = user && await compare(String(password), user.password_hash).catch(() => false);
 
     if (!usernameMatched || !passwordMatched) {
         limit.count++;
@@ -67,7 +61,7 @@ authRouter.post('/login', async (c) => {
     // success
     rateLimitMap.delete(ip);
 
-    const token = await createToken(expectedUsername, expectedRole);
+    const token = await createToken(user!.username, user!.role);
     setCookie(c, COOKIE_NAME, token, {
         httpOnly: true,
         maxAge: config.auth.token_expire_days * 24 * 60 * 60,

@@ -32,6 +32,8 @@ import { getTerminal, writeToTerminal, onTerminalData, touchTerminal, markTermin
 import { larkChannel, webSocketChannel } from './channels';
 import { getDb } from './db';
 import { logger as appLogger } from './services/logger';
+import { hashSync } from 'bcrypt';
+import { randomUUID } from 'crypto';
 
 // ===== Graceful Shutdown 状态管理 =====
 let isShuttingDown = false;
@@ -87,6 +89,35 @@ loadConfig();
 initDb();
 const config = getConfig();
 applyServerConsoleLogging(config.logs);
+
+// T-DB-SYNC: Sync AUTH_PASSWORD to users table on startup
+{
+    const db = getDb();
+    const plainPassword = config.auth.bootstrap_password;
+    const passwordHash = hashSync(plainPassword, 12);
+    const now = Date.now();
+
+    // Try to find existing user
+    const existingUser = db.prepare(
+        'SELECT id, password_hash FROM users WHERE username = ?'
+    ).get(config.auth.bootstrap_username) as { id: string; password_hash: string } | undefined;
+
+    if (existingUser) {
+        // Update password hash if changed (comparing the plain text would be wrong,
+        // so we always update on startup for simplicity - bcrypt is fast enough)
+        db.prepare(
+            'UPDATE users SET password_hash = ? WHERE id = ?'
+        ).run(passwordHash, existingUser.id);
+        console.log('[Startup] Password hash synced to DB (updated)');
+    } else {
+        // Create new user with bcrypt hash
+        const userId = randomUUID();
+        db.prepare(
+            'INSERT INTO users (id, username, password_hash, role, created_at) VALUES (?, ?, ?, ?, ?)'
+        ).run(userId, config.auth.bootstrap_username, passwordHash, config.auth.bootstrap_role, now);
+        console.log('[Startup] Password hash synced to DB (created)');
+    }
+}
 
 /**
  * 根据消息解析工作区ID
