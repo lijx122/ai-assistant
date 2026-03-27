@@ -400,7 +400,7 @@ const isSessionsLoading = ref(true)
 const isTodoLoading = ref(true)
 const messagePaneKey = ref(0)
 const expandedToolBlocks = ref({})
-const drMode = ref<string | null>(null)
+const drMode = ref(null)
 const drPickerOpen = ref(false)
 const deepResearchMode = computed(() => drMode.value !== null)
 const drModeLabel = computed(() => ({
