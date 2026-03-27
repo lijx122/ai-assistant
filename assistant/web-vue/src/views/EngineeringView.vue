@@ -115,6 +115,42 @@
         </div>
       </div>
 
+      <!-- Diff 视图覆盖层 -->
+      <div v-if="diffVisible"
+        class="absolute inset-0 z-50 flex flex-col bg-[#1e1e2e] border border-white/10 rounded-2xl shadow-2xl">
+        <!-- Diff 工具栏 -->
+        <div class="flex items-center justify-between px-4 py-2 shrink-0
+                    border-b border-white/10">
+          <div class="flex items-center gap-2">
+            <FileCode class="w-4 h-4 text-white/40 shrink-0"/>
+            <span class="text-[12px] text-white/70 font-mono truncate">
+              {{ diffFilePath }}
+            </span>
+            <span class="text-[10px] text-oxygen-blue/60 font-mono ml-2">
+              修改预览
+            </span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="acceptDiff"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+                     bg-green-500/20 hover:bg-green-500/30
+                     text-green-400 text-[11px] font-bold transition-colors">
+              <Check class="w-3.5 h-3.5"/>
+              <span>接受全部</span>
+            </button>
+            <button @click="rejectDiff"
+              class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+                     bg-red-500/20 hover:bg-red-500/30
+                     text-red-400 text-[11px] font-bold transition-colors">
+              <X class="w-3.5 h-3.5"/>
+              <span>拒绝</span>
+            </button>
+          </div>
+        </div>
+        <!-- Diff 编辑器 -->
+        <div ref="diffEl" class="flex-1 min-h-0"/>
+      </div>
+
       <!-- 拖拽分割线 -->
       <div class="h-1 bg-black cursor-row-resize hover:bg-oxygen-blue/30
                   transition-colors shrink-0"
@@ -256,13 +292,14 @@ import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import * as monaco from 'monaco-editor'
+import { editor as MonacoEditor } from 'monaco-editor'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import {
   FilePlus, FolderPlus, RefreshCw, FileCode,
-  Save, Terminal, Plus, X, Trash2, Pencil, ChevronUp, ChevronDown
+  Save, Terminal, Plus, X, Trash2, Pencil, ChevronUp, ChevronDown, Check
 } from 'lucide-vue-next'
 import FileTreeNode from '../components/FileTreeNode.vue'
 
@@ -297,6 +334,13 @@ const cwd = ref('')
 const searchVisible = ref(false)
 const searchQuery = ref('')
 const searchInputEl = ref(null)
+
+// ── Diff 视图状态 ──
+const diffVisible = ref(false)
+const diffOldContent = ref('')
+const diffNewContent = ref('')
+const diffFilePath = ref('')
+const diffEl = ref(null)
 
 // ── localStorage 工具函数（记录用户主动关闭的终端）──
 function getClosedTerminalIds() {
@@ -883,6 +927,90 @@ function startResize(e) {
   document.addEventListener('mousemove', onMove)
   document.addEventListener('mouseup', onUp)
 }
+
+// ── Monaco Diff 视图 ──
+
+function showDiff(oldContent, newContent, filePath) {
+  diffOldContent.value = oldContent
+  diffNewContent.value = newContent
+  diffFilePath.value = filePath
+  diffVisible.value = true
+  nextTick(() => {
+    if (diffEl.value) {
+      const origLang = getLanguageFromPath(filePath)
+      diffEditor = MonacoEditor.createDiffEditor(diffEl.value, {
+        theme: 'vs-dark',
+        fontSize: 13,
+        fontFamily: 'JetBrains Mono, monospace',
+        readOnly: true,
+        renderSideBySide: true,
+        automaticLayout: true,
+      })
+      const originalModel = MonacoEditor.createModel(oldContent, origLang)
+      const modifiedModel = MonacoEditor.createModel(newContent, origLang)
+      diffEditor.setModel({
+        original: originalModel,
+        modified: modifiedModel,
+      })
+    }
+  })
+}
+
+function hideDiff() {
+  diffVisible.value = false
+  if (diffEditor) {
+    diffEditor.dispose()
+    diffEditor = null
+  }
+}
+
+async function acceptDiff() {
+  if (!diffFilePath.value || !diffNewContent.value) return
+  try {
+    await api.put('/api/files/content', {
+      workspaceId: store.currentWorkspace.id,
+      path: diffFilePath.value,
+      content: diffNewContent.value,
+    })
+    hideDiff()
+    // 重新加载文件树
+    await refreshTree()
+    // 如果当前打开的是同一个文件，刷新内容
+    if (currentFilePath.value === diffFilePath.value && monacoEditor) {
+      const data = await api.get(
+        `/api/files/content?workspaceId=${store.currentWorkspace.id}`+
+        `&path=${encodeURIComponent(diffFilePath.value)}`)
+      if (data?.content !== undefined) {
+        monacoEditor.setValue(data.content)
+        isDirty.value = false
+      }
+    }
+  } catch (e) {
+    console.error('[Diff] Accept failed:', e)
+  }
+}
+
+function rejectDiff() {
+  hideDiff()
+}
+
+function getLanguageFromPath(path) {
+  const ext = path.split('.').pop()?.toLowerCase()
+  const langMap = {
+    'js': 'javascript', 'jsx': 'javascript',
+    'ts': 'typescript', 'tsx': 'typescript',
+    'py': 'python', 'go': 'go', 'rs': 'rust',
+    'java': 'java', 'c': 'c', 'cpp': 'cpp', 'h': 'cpp',
+    'css': 'css', 'scss': 'scss', 'less': 'less',
+    'html': 'html', 'xml': 'xml', 'json': 'json',
+    'yaml': 'yaml', 'yml': 'yaml', 'md': 'markdown',
+    'sql': 'sql', 'sh': 'shell', 'bash': 'shell',
+  }
+  return langMap[ext] || 'plaintext'
+}
+
+// 监听来自 AI 的文件修改事件（通过 WebSocket）
+// 可通过 window.showFileDiff = showDiff 暴露给外部调用
 
 // ── 生命周期 ──
 

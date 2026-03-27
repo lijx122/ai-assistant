@@ -313,6 +313,40 @@
         </template>
         <!-- 正常输入模式 -->
         <template v-else>
+          <!-- 附件列表 -->
+          <div v-if="attachments.length > 0" class="w-full mb-2">
+            <div class="flex flex-wrap gap-2">
+              <div v-for="(att, idx) in attachments" :key="idx"
+                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl
+                       bg-slate-100 border border-slate-200 text-[11px]">
+                <FileIcon class="w-3.5 h-3.5 text-slate-400 shrink-0"/>
+                <span class="text-slate-600 truncate max-w-24">{{ att.name }}</span>
+                <span class="text-slate-400 text-[9px]">{{ formatFileSize(att.size) }}</span>
+                <button @click="removeAttachment(idx)"
+                  class="ml-1 hover:text-red-500 transition-colors">
+                  <X class="w-3 h-3"/>
+                </button>
+              </div>
+            </div>
+          </div>
+          <!-- 拖放区域 -->
+          <div
+            @dragover.prevent="isDraggingOver = true"
+            @dragleave.prevent="isDraggingOver = false"
+            @drop.prevent="handleFileDrop"
+            :class="['w-full rounded-xl border-2 border-dashed transition-colors mb-2',
+                     isDraggingOver
+                       ? 'border-oxygen-blue bg-oxygen-blue/5'
+                       : 'border-transparent hover:border-slate-200']">
+            <label :class="['flex items-center gap-2 px-3 py-2 cursor-pointer text-[11px]',
+                             isDraggingOver ? 'text-oxygen-blue' : 'text-slate-400 hover:text-slate-600']">
+              <Paperclip class="w-4 h-4"/>
+              <span>{{ isDraggingOver ? '松开以添加附件' : '拖放文件或点击添加' }}</span>
+              <input type="file" multiple class="hidden"
+                @change="handleFileSelect"
+                accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html,.xml,.yaml,.yml"/>
+            </label>
+          </div>
           <button class="shrink-0 mb-3 hover:opacity-70 transition-opacity">
             <Paperclip class="w-[18px] h-[18px] opacity-40"/>
           </button>
@@ -441,7 +475,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -472,6 +506,8 @@ const drModeLabel = computed(() => ({
 // 编辑重发状态
 const editingMessage = ref(null)  // 正在编辑的消息
 const editingText = ref('')       // 编辑中的文本
+const attachments = ref([])        // 附件列表
+const isDraggingOver = ref(false) // 拖拽状态
 let ws = null
 let currentMsgId = null
 
@@ -592,6 +628,55 @@ async function startBranchMessage(msg) {
   } catch (e) {
     console.error('[Branch] Failed to create branch:', e)
   }
+}
+
+// ── 文件拖放注入 ──
+
+const SUPPORTED_EXTENSIONS = [
+  '.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx',
+  '.py', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp',
+  '.css', '.html', '.xml', '.yaml', '.yml', '.toml', '.ini',
+  '.sh', '.bash', '.zsh', '.sql', '.gitignore', '.env'
+]
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + 'B'
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'K'
+  return (bytes / (1024 * 1024)).toFixed(1) + 'M'
+}
+
+function isTextFile(filename) {
+  const ext = '.' + filename.split('.').pop().toLowerCase()
+  return SUPPORTED_EXTENSIONS.includes(ext)
+}
+
+async function handleFileDrop(e) {
+  isDraggingOver.value = false
+  const files = Array.from(e.dataTransfer.files)
+  await processFiles(files)
+}
+
+async function handleFileSelect(e) {
+  const files = Array.from(e.target.files)
+  await processFiles(files)
+  e.target.value = ''
+}
+
+async function processFiles(files) {
+  for (const file of files) {
+    if (!isTextFile(file.name)) continue
+    if (file.size > 1024 * 1024) continue
+    try {
+      const content = await file.text()
+      attachments.value.push({ name: file.name, size: file.size, content })
+    } catch (e) {
+      console.error('[File] Read error:', file.name, e)
+    }
+  }
+}
+
+function removeAttachment(idx) {
+  attachments.value.splice(idx, 1)
 }
 
 // ── 消息处理 ──
@@ -798,13 +883,26 @@ let isSending = false
 
 async function sendMessage() {
   let text = inputText.value.trim()
-  if (!text || store.isStreaming || isSending) return
+  const hasAttachments = attachments.value.length > 0
+  if (!text && !hasAttachments) return
+  if (store.isStreaming || isSending) return
+
+  // 格式化附件内容
+  let finalContent = text
+  if (hasAttachments) {
+    const attParts = attachments.value.map(att => {
+      return `[文件: ${att.name}]\n\`\`\`${att.name}\n${att.content}\n\`\`\``
+    }).join('\n\n')
+    finalContent = text ? `${text}\n\n${attParts}` : attParts
+  }
+
   if (!store.currentSession) {
     await newSession()
   }
 
   isSending = true
   inputText.value = ''
+  attachments.value = []
   if (inputEl.value) {
     inputEl.value.style.height = 'auto'
   }
@@ -812,13 +910,13 @@ async function sendMessage() {
   // 深度研究模式：注入工具调用指令
   if (drMode.value) {
     if (drMode.value === 'web') {
-      text = `请使用 deep_research 工具（mode: web）研究：\n\n${text}`
+      finalContent = `请使用 deep_research 工具（mode: web）研究：\n\n${finalContent}`
     } else if (drMode.value === 'codebase') {
-      text = `请使用 deep_research 工具（mode: codebase）分析当前工作区，重点关注：\n\n${text}`
+      finalContent = `请使用 deep_research 工具（mode: codebase）分析当前工作区，重点关注：\n\n${finalContent}`
     } else if (drMode.value === 'github') {
-      text = `请使用 deep_research 工具（mode: github, clone_depth: false）分析项目：\n\n${text}`
+      finalContent = `请使用 deep_research 工具（mode: github, clone_depth: false）分析项目：\n\n${finalContent}`
     } else if (drMode.value === 'github-deep') {
-      text = `请使用 deep_research 工具（mode: github, clone_depth: true）深度分析项目（包括 clone 代码）：\n\n${text}`
+      finalContent = `请使用 deep_research 工具（mode: github, clone_depth: true）深度分析项目（包括 clone 代码）：\n\n${finalContent}`
     }
   }
 
@@ -826,7 +924,7 @@ async function sendMessage() {
   messages.value.push({
     id: 'temp-' + Date.now(),
     role: 'user',
-    content: text,
+    content: finalContent,
   })
   await nextTick()
   scrollToBottom()
@@ -840,7 +938,7 @@ async function sendMessage() {
     await api.post('/api/chat', {
       sessionId: store.currentSession.id,
       workspaceId: store.currentWorkspace.id,
-      content: text,
+      content: finalContent,
     })
   } catch(e) {
     store.isStreaming = false
