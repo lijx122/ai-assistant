@@ -1,8 +1,201 @@
 <template>
-  <div class="flex flex-1 min-h-0 gap-3">
+  <!-- 移动端：全屏布局 -->
+  <div v-if="isMobile" class="flex flex-col h-full">
 
-    <!-- 左侧会话列表 -->
-    <div class="w-56 tactile-container flex flex-col overflow-hidden shrink-0">
+    <!-- 顶部工具栏（移动端） -->
+    <div class="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-100 shrink-0">
+      <button @click="showMobileDrawer = true"
+        class="p-2 rounded-lg hover:bg-slate-100">
+        <Menu class="w-4 h-4"/>
+      </button>
+      <div class="flex items-center gap-2 text-[10px] font-mono text-slate-400">
+        <Layers class="w-3 h-3"/>
+        <span>{{ messages.length }}/20</span>
+      </div>
+    </div>
+
+    <!-- 主对话区（移动端全宽） -->
+    <div class="flex-1 flex flex-col min-h-0 min-w-0">
+
+      <!-- 消息列表 -->
+      <div ref="msgList"
+        :key="messagePaneKey"
+        @click="handleMessagePaneClick"
+        class="flex-1 bg-white p-4 flex flex-col no-scrollbar
+               overflow-y-auto space-y-4 min-h-0 wb-message-pane">
+        <!-- 空状态 -->
+        <div v-if="!messages.length"
+          class="flex-1 flex flex-col items-center justify-center text-slate-400">
+          <svg class="w-16 h-16 mb-3 opacity-70" viewBox="0 0 96 96" fill="none" aria-hidden="true">
+            <rect x="16" y="20" width="64" height="44" rx="14" stroke="currentColor" stroke-width="2.5"/>
+            <path d="M30 38h36M30 46h24" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+            <path d="M44 64l4 8 4-8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <p class="text-sm font-light">选择工作区，开始对话</p>
+        </div>
+
+        <!-- 消息气泡 -->
+        <div v-for="msg in messages" :key="msg.id"
+          :class="['flex gap-2',
+                   msg.role === 'user' ? 'justify-end' : 'justify-start']">
+          <div v-if="msg.role === 'assistant'"
+            class="w-6 h-6 rounded-lg bg-deep-charcoal flex items-center
+                   justify-center text-white text-[9px] font-bold shrink-0 mt-1">
+            W
+          </div>
+          <div :class="['max-w-[85%] rounded-2xl px-3 py-2 text-sm leading-relaxed relative group',
+                        msg.role === 'user'
+                          ? 'bg-oxygen-blue text-white rounded-br-sm'
+                          : 'bg-slate-100 shadow-sm rounded-bl-sm']">
+            <!-- 工具调用块 -->
+            <div v-if="hasToolUse(msg)" class="mb-2 space-y-1">
+              <div v-for="block in getToolBlocks(msg)" :key="block.id"
+                class="bg-slate-50 rounded-xl text-[10px] font-mono
+                       text-slate-500 border border-slate-100 overflow-hidden">
+                <div class="px-3 py-2 flex items-center gap-2">
+                  <XCircle v-if="block.success === false" class="w-3 h-3 text-red-400 shrink-0"/>
+                  <CheckCircle v-else class="w-3 h-3 text-green-500 shrink-0"/>
+                  <span class="truncate">{{ block.name }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- 文本内容 -->
+            <div v-if="getTextContent(msg)"
+              class="prose prose-sm max-w-none wb-markdown"
+              :class="msg.role === 'user' ? 'prose-invert wb-markdown-user' : ''"
+              v-html="renderMarkdown(getTextContent(msg))">
+            </div>
+          </div>
+          <div v-if="msg.role === 'user'"
+            class="w-6 h-6 rounded-lg bg-slate-200 flex items-center
+                   justify-center text-[9px] font-bold shrink-0 mt-1">
+            A
+          </div>
+        </div>
+
+        <!-- 流式输出 -->
+        <div v-if="store.isStreaming || streamingToolCalls.length || streamingText"
+          class="flex gap-2 justify-start">
+          <div class="w-6 h-6 rounded-lg bg-deep-charcoal flex items-center
+                      justify-center text-white text-[9px] font-bold shrink-0">W</div>
+          <div class="flex-1 min-w-0">
+            <div v-if="streamingToolCalls.length"
+              class="bg-slate-50 rounded-xl border border-slate-100 p-2 mb-2">
+              <div v-for="tool in streamingToolCalls" :key="tool.id"
+                class="flex items-center gap-2 text-[10px] font-mono">
+                <Loader2 v-if="tool.status === 'running'" class="w-3 h-3 animate-spin text-oxygen-blue"/>
+                <CheckCircle v-else class="w-3 h-3 text-green-500"/>
+                {{ tool.name }}
+              </div>
+            </div>
+            <div v-if="streamingText"
+              class="bg-slate-100 rounded-xl rounded-bl-sm px-3 py-2 text-sm">
+              <div class="prose prose-sm max-w-none wb-markdown"
+                v-html="renderMarkdown(streamingText)"/>
+              <span v-if="store.isStreaming"
+                class="inline-block w-0.5 h-3 bg-slate-400 ml-0.5 animate-pulse"/>
+            </div>
+            <div v-else-if="store.isStreaming && !streamingToolCalls.length"
+              class="flex gap-1.5 items-center py-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-300 animate-bounce" style="animation-delay:0ms"/>
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-300 animate-bounce" style="animation-delay:150ms"/>
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-300 animate-bounce" style="animation-delay:300ms"/>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 输入区（移动端 sticky bottom） -->
+      <div class="tactile-container mx-3 mb-3 px-4 py-3 flex items-end gap-3
+                  bg-white/40 min-h-[68px] shrink-0 mobile-input-area">
+        <!-- 附件按钮 -->
+        <label class="shrink-0 mb-1 hover:opacity-70 transition-opacity cursor-pointer">
+          <input type="file" multiple class="hidden"
+            @change="handleFileSelect"
+            accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html,.xml,.yaml,.yml"/>
+          <Paperclip class="w-[16px] h-[16px] opacity-40"/>
+        </label>
+        <!-- 输入框 -->
+        <textarea ref="inputEl"
+          v-model="inputText"
+          rows="1"
+          placeholder="向 Claude 下达指令…"
+          class="flex-1 bg-transparent border-none outline-none font-light
+                 min-w-0 resize-none py-1.5"
+          style="min-height:36px;max-height:150px;font-size:14px;
+                 padding:6px 10px;line-height:1.5;"
+          @keydown="handleKeydown"
+          @input="autoResize"/>
+        <!-- 发送按钮 -->
+        <button @click="sendMessage"
+          :disabled="store.isStreaming || !inputText.trim()"
+          class="bg-oxygen-blue text-white p-2 rounded-xl shrink-0
+                 disabled:opacity-40">
+          <Send class="w-4 h-4"/>
+        </button>
+      </div>
+    </div>
+
+    <!-- 移动端会话抽屉 -->
+    <Transition name="slide-left">
+      <div v-if="showMobileDrawer"
+        class="fixed inset-0 z-50 flex"
+        @click.self="showMobileDrawer = false">
+        <div class="w-72 bg-white h-full shadow-2xl flex flex-col">
+          <!-- 抽屉头部 -->
+          <div class="flex items-center justify-between p-4 border-b border-slate-100">
+            <p class="text-sm font-bold">会话记录</p>
+            <div class="flex items-center gap-2">
+              <button @click="newSession"
+                class="p-2 rounded-lg hover:bg-slate-100">
+                <Plus class="w-4 h-4"/>
+              </button>
+              <button @click="showMobileDrawer = false">
+                <X class="w-4 h-4 opacity-40"/>
+              </button>
+            </div>
+          </div>
+          <!-- 工作区信息 -->
+          <div class="px-4 py-3">
+            <div class="flex items-center gap-2 bg-slate-50 px-3 py-2 rounded-xl text-[10px] font-mono opacity-60">
+              <FolderOpen class="w-3 h-3"/>
+              <span>{{ store.currentWorkspace?.name || '—' }}</span>
+            </div>
+          </div>
+          <!-- 会话列表 -->
+          <div class="flex-1 overflow-y-auto no-scrollbar px-3 pb-4">
+            <div v-if="!sessions.length"
+              class="flex flex-col items-center justify-center py-8 text-slate-400">
+              <MessageCircle class="w-10 h-10 mb-2 opacity-70"/>
+              <p class="text-[11px] font-mono">暂无会话</p>
+            </div>
+            <div v-else>
+              <div v-for="s in sessions" :key="s.id"
+                @click="selectSession(s); showMobileDrawer = false"
+                :class="['w-full text-left px-3 py-3 rounded-xl text-[12px]',
+                         'transition-colors flex items-center gap-2 cursor-pointer',
+                         store.currentSession?.id === s.id
+                           ? 'bg-oxygen-blue/10 text-oxygen-blue font-medium'
+                           : 'hover:bg-slate-50']">
+                <MessageCircle class="w-3 h-3 shrink-0"/>
+                <span class="truncate flex-1">{{ s.title || '新会话' }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="flex-1 bg-black/20 backdrop-blur-sm" @click="showMobileDrawer = false"/>
+      </div>
+    </Transition>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- 桌面/平板布局                                                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div v-else class="flex flex-1 min-h-0 gap-3">
+
+    <!-- 左侧会话列表（平板隐藏） -->
+    <div v-if="!isTablet"
+      class="w-56 tactile-container flex flex-col overflow-hidden shrink-0">
       <div class="px-5 pt-5 pb-3 shrink-0">
         <div class="flex items-center justify-between mb-3">
           <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">
@@ -423,8 +616,9 @@
       </div>
     </div>
 
-    <!-- 右侧 Todo 面板 -->
-    <div class="w-48 tactile-container flex flex-col overflow-hidden shrink-0">
+    <!-- 右侧 Todo 面板（移动端隐藏） -->
+    <div v-if="!isMobile"
+      class="w-48 tactile-container flex flex-col overflow-hidden shrink-0">
       <div class="px-4 pt-4 pb-3 shrink-0 border-b border-slate-100/50">
         <div class="flex items-center justify-between">
           <p class="text-[9px] font-bold uppercase tracking-[0.2em] opacity-30">
@@ -476,15 +670,21 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted, inject } from 'vue'
 import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon, Menu
 } from 'lucide-vue-next'
 
 const store = useAppStore()
+
+// ── 响应式 ──
+const isMobile = inject('isMobile', ref(false))
+const isTablet = inject('isTablet', ref(false))
+const showMobileDrawer = ref(false) // 移动端抽屉
+
 const sessions = ref([])
 const messages = ref([])
 const inputText = ref('')

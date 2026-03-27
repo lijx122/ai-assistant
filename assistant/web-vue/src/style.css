@@ -179,3 +179,75 @@
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* ═══════════════════════════════════════════════════════════════ */
+/* 响应式适配样式                                                  */
+/* ═══════════════════════════════════════════════════════════════ */
+
+/* 底部安全区（iPhone 刘海屏）*/
+.safe-area-pb {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 抽屉动画 */
+.slide-enter-active,
+.slide-leave-active {
+  transition: opacity 0.2s ease;
+}
+.slide-enter-active > div:first-child,
+.slide-leave-active > div:first-child {
+  transition: transform 0.25s ease;
+}
+.slide-enter-from > div:first-child {
+  transform: translateX(-100%);
+}
+.slide-leave-to > div:first-child {
+  transform: translateX(-100%);
+}
+.slide-enter-from,
+.slide-leave-to {
+  opacity: 0;
+}
+
+/* ChatView 移动端抽屉动画 */
+.slide-left-enter-active,
+.slide-left-leave-active {
+  transition: opacity 0.2s ease;
+}
+.slide-left-enter-active > div:first-child,
+.slide-left-leave-active > div:first-child {
+  transition: transform 0.25s ease;
+}
+.slide-left-enter-from > div:first-child {
+  transform: translateX(-100%);
+}
+.slide-left-leave-to > div:first-child {
+  transform: translateX(-100%);
+}
+.slide-left-enter-from,
+.slide-left-leave-to {
+  opacity: 0;
+}
+
+/* 淡入淡出动画 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* 移动端隐藏滚动条 */
+@media (max-width: 768px) {
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+}
+
+/* 防止移动端输入框被键盘顶起 */
+@supports (-webkit-touch-callout: none) {
+  .mobile-input-area {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}

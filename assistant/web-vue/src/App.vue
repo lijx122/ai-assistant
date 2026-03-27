@@ -1,5 +1,5 @@
 <template>
-  <!-- 登录界面 -->
+  <!-- 登录界面（保持不变） -->
   <div v-if="!store.isLoggedIn"
     class="h-screen bg-limestone flex items-center justify-center">
     <div class="tactile-container p-10 w-80 flex flex-col gap-5">
@@ -31,8 +31,11 @@
     </div>
   </div>
 
-  <!-- 主界面 -->
-  <div v-else class="flex h-screen p-5 gap-5 bg-limestone font-['Plus_Jakarta_Sans']">
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- 桌面布局（≥1024px）：原有布局不变                              -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div v-else-if="isDesktop"
+    class="flex h-screen p-5 gap-5 bg-limestone font-['Plus_Jakarta_Sans']">
 
     <!-- 侧边导航 -->
     <nav class="w-20 tactile-container flex flex-col items-center
@@ -71,13 +74,6 @@
         title="日志">
         <ScrollText class="w-5 h-5"/>
       </button>
-      <!-- 任务规划 - 暂时隐藏 -->
-      <!-- <button @click="currentView='plan'"
-        :class="['nav-link p-3.5 rounded-2xl',
-                 currentView==='plan' ? 'active' : '']"
-        title="任务规划">
-        <LayoutList class="w-5 h-5"/>
-      </button> -->
 
       <div class="mt-auto">
         <button @click="doLogout" class="nav-link p-3.5 rounded-2xl" title="退出">
@@ -121,7 +117,6 @@
                 </button>
               </div>
               <div class="border-t border-slate-100 p-2" data-ws-picker>
-                <!-- 未输入时显示按钮 -->
                 <div v-if="!showNewWsInput"
                   @click.stop="showNewWsInput = true"
                   class="flex items-center gap-2 px-3 py-2 rounded-xl
@@ -129,7 +124,6 @@
                          cursor-pointer transition-opacity hover:opacity-70">
                   <Plus class="w-3 h-3"/>新建工作区
                 </div>
-                <!-- 输入时显示 input -->
                 <div v-else class="flex items-center gap-2 px-1" @click.stop>
                   <input v-model="newWsName" ref="newWsInputEl"
                     class="flex-1 bg-white px-3 py-1.5 rounded-xl border
@@ -155,8 +149,8 @@
             title="管理工作区">
             <Settings class="w-4 h-4 opacity-30 hover:opacity-60 transition-opacity"/>
           </button>
-          <span class="w-px h-4 bg-slate-200 hidden sm:block"></span>
-          <div class="hidden md:flex items-center gap-1.5 text-[10px] font-mono opacity-35">
+          <span class="w-px h-4 bg-slate-200"></span>
+          <div class="flex items-center gap-1.5 text-[10px] font-mono opacity-35">
             <Lock class="w-3 h-3"/>
             <span>锁: 空闲 · 队列: 0</span>
           </div>
@@ -174,8 +168,8 @@
               <span class="w-1.5 h-1.5 rounded-full bg-purple-400"></span>飞书
             </span>
           </div>
-          <span class="w-px h-4 bg-slate-200 hidden sm:block"></span>
-          <div class="text-right hidden sm:block">
+          <span class="w-px h-4 bg-slate-200"></span>
+          <div class="text-right">
             <p class="text-[9px] font-bold opacity-25 uppercase tracking-[0.2em]">
               运行器状态</p>
             <p class="text-[11px] font-mono">idle</p>
@@ -192,150 +186,222 @@
       <component :is="currentComponent" class="flex-1 min-h-0 overflow-hidden"/>
     </div>
 
-    <!-- 工作区管理 Modal -->
-    <div v-if="showWsManager"
-      class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50
-             flex items-center justify-center p-5"
-      @click.self="showWsManager = false">
-      <div class="tactile-container p-8 w-[480px] flex flex-col gap-5
-                  max-h-[80vh] overflow-hidden">
+    <!-- 工作区管理 Modal（桌面版） -->
+    <WorkspaceManager />
+  </div>
 
-        <!-- 标题 -->
-        <div class="flex items-center justify-between shrink-0">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-oxygen-blue/10 rounded-2xl flex
-                        items-center justify-center">
-              <FolderOpen class="w-5 h-5 text-oxygen-blue"/>
-            </div>
-            <div>
-              <p class="font-bold">工作区管理</p>
-              <p class="text-[10px] font-mono opacity-40">
-                {{ store.workspaces?.length || 0 }} 个工作区
-              </p>
-            </div>
-          </div>
-          <button @click="showWsManager = false"
-            class="p-2 rounded-xl hover:bg-slate-100 transition-colors">
-            <X class="w-4 h-4 opacity-40"/>
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- 平板布局（768-1023px）：收窄侧边栏，内容区全宽                  -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div v-else-if="isTablet"
+    class="flex h-screen bg-limestone font-['Plus_Jakarta_Sans']">
+
+    <!-- 收窄侧边栏（只有图标） -->
+    <nav class="w-14 bg-white flex flex-col items-center py-6 gap-4
+                border-r border-slate-100 shrink-0">
+      <div class="w-9 h-9 bg-deep-charcoal rounded-xl flex items-center
+                  justify-center text-white font-bold italic text-sm mb-2">W</div>
+
+      <button @click="currentView='intelligence'"
+        :class="['p-2.5 rounded-xl transition-colors',
+                 currentView==='intelligence'
+                   ? 'bg-oxygen-blue/10 text-oxygen-blue'
+                   : 'text-slate-400 hover:bg-slate-50']">
+        <MessageCircle class="w-5 h-5"/>
+      </button>
+      <button @click="currentView='engineering'"
+        :class="['p-2.5 rounded-xl transition-colors',
+                 currentView==='engineering'
+                   ? 'bg-oxygen-blue/10 text-oxygen-blue'
+                   : 'text-slate-400 hover:bg-slate-50']">
+        <Code2 class="w-5 h-5"/>
+      </button>
+      <button @click="currentView='automation'"
+        :class="['p-2.5 rounded-xl transition-colors',
+                 currentView==='automation'
+                   ? 'bg-oxygen-blue/10 text-oxygen-blue'
+                   : 'text-slate-400 hover:bg-slate-50']">
+        <CalendarClock class="w-5 h-5"/>
+      </button>
+      <button @click="currentView='observability'"
+        :class="['p-2.5 rounded-xl transition-colors',
+                 currentView==='observability'
+                   ? 'bg-oxygen-blue/10 text-oxygen-blue'
+                   : 'text-slate-400 hover:bg-slate-50']">
+        <BarChartBig class="w-5 h-5"/>
+      </button>
+      <button @click="currentView='logs'"
+        :class="['p-2.5 rounded-xl transition-colors',
+                 currentView==='logs'
+                   ? 'bg-oxygen-blue/10 text-oxygen-blue'
+                   : 'text-slate-400 hover:bg-slate-50']">
+        <ScrollText class="w-5 h-5"/>
+      </button>
+
+      <button @click="doLogout"
+        class="mt-auto p-2.5 rounded-xl text-slate-400 hover:bg-slate-50">
+        <LogOut class="w-5 h-5"/>
+      </button>
+    </nav>
+
+    <!-- 主内容区（全宽） -->
+    <div class="flex-1 flex flex-col overflow-hidden min-w-0">
+      <!-- 简化 header -->
+      <header class="h-14 flex items-center justify-between px-4
+                     bg-white border-b border-slate-100 shrink-0">
+        <div class="flex items-center gap-2 cursor-pointer"
+          @click="drawerOpen = true; drawerContent = 'workspaces'">
+          <span class="w-2 h-2 rounded-full bg-green-500"/>
+          <span class="text-sm font-semibold font-mono">
+            {{ store.currentWorkspace?.name || '选择工作区' }}
+          </span>
+          <ChevronDown class="w-4 h-4 opacity-40"/>
+        </div>
+        <div class="flex items-center gap-3 text-[10px] font-mono">
+          <span class="flex items-center gap-1 opacity-40">
+            <span class="w-1.5 h-1.5 rounded-full bg-green-500"/>运行器
+          </span>
+          <div class="w-8 h-8 rounded-full bg-slate-200 flex items-center
+                      justify-center text-[10px] font-bold">A</div>
+        </div>
+      </header>
+      <component :is="currentComponent" class="flex-1 min-h-0"/>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- 手机布局（<768px）：底部导航栏 + 全屏视图                        -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <div v-else
+    class="flex flex-col h-screen bg-limestone font-['Plus_Jakarta_Sans']">
+    <!-- 顶部 header -->
+    <header class="h-14 flex items-center justify-between px-4
+                   bg-white border-b border-slate-100 shrink-0 z-10">
+      <button @click="drawerOpen = true; drawerContent = 'menu'"
+        class="p-2 rounded-lg hover:bg-slate-100">
+        <Menu class="w-5 h-5"/>
+      </button>
+      <span class="text-sm font-semibold font-mono">
+        {{ store.currentWorkspace?.name || 'AI Workbench' }}
+      </span>
+      <div class="w-8 h-8 rounded-full bg-slate-200 flex items-center
+                  justify-center text-[10px] font-bold">A</div>
+    </header>
+
+    <!-- 主内容（全屏） -->
+    <div class="flex-1 min-h-0 overflow-hidden">
+      <component :is="currentComponent" class="h-full"/>
+    </div>
+
+    <!-- 底部导航栏 -->
+    <nav class="h-16 bg-white border-t border-slate-100 flex items-center
+                justify-around px-2 shrink-0 safe-area-pb">
+      <button @click="currentView = 'intelligence'"
+        :class="['flex flex-col items-center gap-1 p-2 rounded-xl flex-1',
+                 currentView === 'intelligence'
+                   ? 'text-oxygen-blue'
+                   : 'text-slate-400']">
+        <MessageCircle class="w-5 h-5"/>
+        <span class="text-[9px] font-mono">对话</span>
+      </button>
+      <button @click="currentView = 'engineering'"
+        :class="['flex flex-col items-center gap-1 p-2 rounded-xl flex-1',
+                 currentView === 'engineering'
+                   ? 'text-oxygen-blue'
+                   : 'text-slate-400']">
+        <Code2 class="w-5 h-5"/>
+        <span class="text-[9px] font-mono">工程</span>
+      </button>
+      <button @click="currentView = 'automation'"
+        :class="['flex flex-col items-center gap-1 p-2 rounded-xl flex-1',
+                 currentView === 'automation'
+                   ? 'text-oxygen-blue'
+                   : 'text-slate-400']">
+        <CalendarClock class="w-5 h-5"/>
+        <span class="text-[9px] font-mono">任务</span>
+      </button>
+      <button @click="currentView = 'observability'"
+        :class="['flex flex-col items-center gap-1 p-2 rounded-xl flex-1',
+                 currentView === 'observability'
+                   ? 'text-oxygen-blue'
+                   : 'text-slate-400']">
+        <BarChartBig class="w-5 h-5"/>
+        <span class="text-[9px] font-mono">仪表</span>
+      </button>
+      <button @click="currentView = 'logs'"
+        :class="['flex flex-col items-center gap-1 p-2 rounded-xl flex-1',
+                 currentView === 'logs'
+                   ? 'text-oxygen-blue'
+                   : 'text-slate-400']">
+        <ScrollText class="w-5 h-5"/>
+        <span class="text-[9px] font-mono">日志</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <!-- 抽屉（平板/手机端菜单）                                         -->
+  <!-- ═══════════════════════════════════════════════════════════════ -->
+  <Transition name="slide">
+    <div v-if="drawerOpen"
+      class="fixed inset-0 z-50 flex"
+      @click.self="drawerOpen = false">
+      <div class="w-72 bg-white h-full shadow-2xl flex flex-col p-6">
+        <div class="flex items-center justify-between mb-6">
+          <div class="w-9 h-9 bg-deep-charcoal rounded-xl flex items-center
+                      justify-center text-white font-bold italic">W</div>
+          <button @click="drawerOpen = false">
+            <X class="w-5 h-5 opacity-40"/>
           </button>
         </div>
 
         <!-- 工作区列表 -->
-        <div class="flex-1 overflow-y-auto no-scrollbar space-y-2">
-          <div v-for="ws in store.workspaces" :key="ws.id"
-            class="flex items-center gap-3 p-3 rounded-2xl bg-slate-50
-                   hover:bg-slate-100 transition-colors group">
-
-            <!-- 工作区图标 -->
-            <div class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-              :class="ws.id === store.currentWorkspace?.id
-                ? 'bg-oxygen-blue/15' : 'bg-white'">
-              <Folder class="w-4 h-4"
-                :class="ws.id === store.currentWorkspace?.id
-                  ? 'text-oxygen-blue' : 'opacity-40'"/>
-            </div>
-
-            <!-- 名称（可内联编辑）-->
-            <div class="flex-1 min-w-0">
-              <template v-if="editingWsId === ws.id">
-                <input v-model="editingWsName"
-                  :ref="el => { if (editingWsId === ws.id) editWsInputEl = el }"
-                  class="w-full bg-white px-3 py-1.5 rounded-xl border
-                         border-oxygen-blue/30 text-sm font-mono outline-none"
-                  @keydown.enter="saveWsName(ws)"
-                  @keydown.esc="editingWsId = null"
-                  @blur="saveWsName(ws)"
-                  @click.stop/>
-              </template>
-              <template v-else>
-                <p class="text-sm font-medium truncate">{{ ws.name }}</p>
-                <p class="text-[10px] font-mono opacity-30 truncate">
-                  {{ ws.root_path?.split('/').pop() || ws.id.slice(0, 8) }}
-                </p>
-              </template>
-            </div>
-
-            <!-- 当前标记 -->
-            <span v-if="ws.id === store.currentWorkspace?.id"
-              class="text-[9px] font-mono bg-oxygen-blue/10
-                     text-oxygen-blue px-2 py-0.5 rounded-full shrink-0">
-              当前
-            </span>
-
-            <!-- 操作按钮 -->
-            <div class="flex items-center gap-1 shrink-0
-                        opacity-0 group-hover:opacity-100 transition-opacity">
-              <!-- 切换 -->
-              <button v-if="ws.id !== store.currentWorkspace?.id"
-                @click="switchAndClose(ws)"
-                class="p-1.5 rounded-lg hover:bg-white transition-colors"
-                title="切换到此工作区">
-                <ArrowRightCircle class="w-3.5 h-3.5 text-oxygen-blue"/>
-              </button>
-              <!-- 重命名 -->
-              <button @click.stop="startEditWs(ws)"
-                class="p-1.5 rounded-lg hover:bg-white transition-colors"
-                title="重命名">
-                <Pencil class="w-3.5 h-3.5 opacity-40"/>
-              </button>
-              <!-- 删除 -->
-              <button
-                @click="deleteWorkspace(ws)"
-                :disabled="store.workspaces?.length <= 1"
-                class="p-1.5 rounded-lg hover:bg-red-50 transition-colors
-                       disabled:opacity-20 disabled:cursor-not-allowed"
-                title="删除">
-                <Trash2 class="w-3.5 h-3.5 text-red-400"/>
-              </button>
-            </div>
-          </div>
+        <p class="text-[9px] font-mono opacity-30 uppercase tracking-widest mb-3">
+          工作区
+        </p>
+        <div class="space-y-1 mb-6">
+          <button v-for="ws in store.workspaces" :key="ws.id"
+            @click="selectWorkspace(ws); drawerOpen = false"
+            :class="['w-full text-left px-3 py-2.5 rounded-xl text-sm',
+                     ws.id === store.currentWorkspace?.id
+                       ? 'bg-oxygen-blue/10 text-oxygen-blue font-medium'
+                       : 'hover:bg-slate-50']">
+            {{ ws.name }}
+          </button>
         </div>
 
-        <!-- 新建工作区 -->
-        <div class="shrink-0 border-t border-slate-100 pt-4">
-          <div v-if="!showNewWsInManager" class="flex">
-            <button @click="showNewWsInManager = true"
-              class="flex items-center gap-2 px-4 py-2.5 rounded-2xl
-                     bg-oxygen-blue/10 hover:bg-oxygen-blue/20
-                     text-oxygen-blue text-sm font-medium transition-colors">
-              <Plus class="w-4 h-4"/>新建工作区
-            </button>
-          </div>
-          <div v-else class="flex gap-2">
-            <input v-model="newWsName" ref="newWsManagerInputEl"
-              class="flex-1 bg-white px-4 py-2.5 rounded-2xl border
-                     border-slate-100 text-sm font-mono outline-none
-                     focus:border-oxygen-blue/40 transition-colors min-w-0"
-              placeholder="输入工作区名称..."
-              @keydown.enter="createWorkspaceFromManager"
-              @keydown.esc="showNewWsInManager = false"/>
-            <button @click="createWorkspaceFromManager"
-              :disabled="!newWsName.trim()"
-              class="px-4 py-2.5 rounded-2xl bg-deep-charcoal text-white
-                     text-sm font-bold hover:opacity-80 disabled:opacity-40
-                     transition-opacity shrink-0">
-              创建
-            </button>
-            <button @click="showNewWsInManager = false"
-              class="px-3 py-2.5 rounded-2xl border border-slate-200
-                     hover:bg-slate-50 text-sm transition-colors shrink-0">
-              取消
-            </button>
-          </div>
+        <div class="mt-auto">
+          <button @click="showWsManager = true; drawerOpen = false"
+            class="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl
+                   hover:bg-slate-50 text-sm mb-2">
+            <Settings class="w-4 h-4 opacity-60"/>管理工作区
+          </button>
+          <button @click="doLogout"
+            class="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl
+                   text-red-400 hover:bg-red-50 text-sm">
+            <LogOut class="w-4 h-4"/>退出登录
+          </button>
         </div>
       </div>
+      <!-- 遮罩 -->
+      <div class="flex-1 bg-black/20 backdrop-blur-sm"/>
     </div>
-  </div>
+  </Transition>
+
+  <!-- 工作区管理 Modal（移动端） -->
+  <Transition name="fade">
+    <WorkspaceManager v-if="showWsManager && !isDesktop" />
+  </Transition>
 </template>
 
 <script setup>
-import { ref, computed, markRaw, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, markRaw, onMounted, onUnmounted, watch, nextTick, provide } from 'vue'
 import { useAppStore } from './stores/app'
 import { api } from './api'
 import {
   MessageCircle, Code2, CalendarClock, BarChartBig,
   ScrollText, LayoutList, LogOut, ChevronDown, Plus, Lock,
-  Settings, FolderOpen, Folder, ArrowRightCircle, Pencil, Trash2, X
+  Settings, FolderOpen, Folder, ArrowRightCircle, Pencil, Trash2, X, Menu
 } from 'lucide-vue-next'
 import ChatView from './views/ChatView.vue'
 import TasksView from './views/TasksView.vue'
@@ -350,6 +416,25 @@ const PlaceholderView = markRaw({
 })
 
 const store = useAppStore()
+
+// ── 响应式状态 ──
+const windowWidth = ref(window.innerWidth)
+const isMobile = computed(() => windowWidth.value < 768)
+const isTablet = computed(() => windowWidth.value >= 768 && windowWidth.value < 1024)
+const isDesktop = computed(() => windowWidth.value >= 1024)
+
+// 移动端抽屉状态
+const drawerOpen = ref(false)
+const drawerContent = ref(null) // 'sessions' | 'workspaces' | 'menu' | null
+
+function onResize() { windowWidth.value = window.innerWidth }
+onMounted(() => window.addEventListener('resize', onResize))
+onUnmounted(() => window.removeEventListener('resize', onResize))
+
+// Provide 给子组件
+provide('isMobile', isMobile)
+provide('isTablet', isTablet)
+
 const currentView = ref('intelligence')
 const wsPickerOpen = ref(false)
 const loginUser = ref('')
@@ -536,5 +621,104 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+})
+
+// ── WorkspaceManager 组件 ──
+const WorkspaceManager = markRaw({
+  props: ['mobile'],
+  emits: ['close'],
+  template: `
+    <div class="fixed inset-0 bg-black/20 backdrop-blur-sm z-50
+                flex items-center justify-center p-5"
+         @click.self="$emit('close')">
+      <div class="tactile-container p-8 w-[480px] flex flex-col gap-5
+                  max-h-[80vh] overflow-hidden">
+        <!-- 标题 -->
+        <div class="flex items-center justify-between shrink-0">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 bg-oxygen-blue/10 rounded-2xl flex
+                        items-center justify-center">
+              <FolderOpen class="w-5 h-5 text-oxygen-blue"/>
+            </div>
+            <div>
+              <p class="font-bold">工作区管理</p>
+              <p class="text-[10px] font-mono opacity-40">
+                {{ store.workspaces?.length || 0 }} 个工作区
+              </p>
+            </div>
+          </div>
+          <button @click="$emit('close')"
+            class="p-2 rounded-xl hover:bg-slate-100 transition-colors">
+            <X class="w-4 h-4 opacity-40"/>
+          </button>
+        </div>
+
+        <!-- 工作区列表 -->
+        <div class="flex-1 overflow-y-auto no-scrollbar space-y-2">
+          <div v-for="ws in store.workspaces" :key="ws.id"
+            class="flex items-center gap-3 p-3 rounded-2xl bg-slate-50
+                   hover:bg-slate-100 transition-colors group">
+            <div class="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
+              :class="ws.id === store.currentWorkspace?.id
+                ? 'bg-oxygen-blue/15' : 'bg-white'">
+              <Folder class="w-4 h-4"
+                :class="ws.id === store.currentWorkspace?.id
+                  ? 'text-oxygen-blue' : 'opacity-40'"/>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium truncate">{{ ws.name }}</p>
+              <p class="text-[10px] font-mono opacity-30 truncate">
+                {{ ws.root_path?.split('/').pop() || ws.id.slice(0, 8) }}
+              </p>
+            </div>
+            <span v-if="ws.id === store.currentWorkspace?.id"
+              class="text-[9px] font-mono bg-oxygen-blue/10
+                     text-oxygen-blue px-2 py-0.5 rounded-full shrink-0">
+              当前
+            </span>
+            <div class="flex items-center gap-1 shrink-0
+                        opacity-0 group-hover:opacity-100 transition-opacity">
+              <button v-if="ws.id !== store.currentWorkspace?.id"
+                @click="switchAndClose(ws)"
+                class="p-1.5 rounded-lg hover:bg-white transition-colors">
+                <ArrowRightCircle class="w-3.5 h-3.5 text-oxygen-blue"/>
+              </button>
+              <button @click="deleteWorkspace(ws)"
+                :disabled="store.workspaces?.length <= 1"
+                class="p-1.5 rounded-lg hover:bg-red-50 transition-colors
+                       disabled:opacity-20 disabled:cursor-not-allowed">
+                <Trash2 class="w-3.5 h-3.5 text-red-400"/>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 新建工作区 -->
+        <div class="shrink-0 border-t border-slate-100 pt-4">
+          <button @click="showNewWsInManager = true"
+            class="flex items-center gap-2 px-4 py-2.5 rounded-2xl
+                   bg-oxygen-blue/10 hover:bg-oxygen-blue/20
+                   text-oxygen-blue text-sm font-medium transition-colors">
+            <Plus class="w-4 h-4"/>新建工作区
+          </button>
+          <div v-if="showNewWsInManager" class="flex gap-2 mt-3">
+            <input v-model="newWsName" ref="newWsManagerInputEl"
+              class="flex-1 bg-white px-4 py-2.5 rounded-2xl border
+                     border-slate-100 text-sm font-mono outline-none
+                     focus:border-oxygen-blue/40 min-w-0"
+              placeholder="输入工作区名称..."
+              @keydown.enter="createWorkspaceFromManager"
+              @keydown.esc="showNewWsInManager = false"/>
+            <button @click="createWorkspaceFromManager"
+              :disabled="!newWsName.trim()"
+              class="px-4 py-2.5 rounded-2xl bg-deep-charcoal text-white
+                     text-sm font-bold hover:opacity-80 disabled:opacity-40">
+              创建
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `
 })
 </script>
