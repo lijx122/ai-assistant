@@ -51,6 +51,12 @@
               <span class="truncate flex-1">
                 {{ s.title || '新会话' }}
               </span>
+              <span @click.stop="exportSession(s)"
+                class="opacity-0 group-hover:opacity-30 hover:!opacity-70
+                       transition-opacity p-0.5 rounded cursor-pointer"
+                title="导出为 Markdown">
+                <Download class="w-3 h-3"/>
+              </span>
               <span @click.stop="deleteSession(s.id)"
                 class="opacity-0 group-hover:opacity-30 hover:!opacity-70
                        transition-opacity p-0.5 rounded cursor-pointer">
@@ -383,7 +389,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -456,6 +462,12 @@ async function deleteSession(id) {
     messages.value = []
   }
   await loadSessions()
+}
+
+async function exportSession(s) {
+  const filename = `${(s.title || '会话记录').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_${s.id.slice(0, 8)}.md`
+  // 直接下载
+  window.open(`/api/sessions/${s.id}/export`, '_blank')
 }
 
 // ── 消息处理 ──

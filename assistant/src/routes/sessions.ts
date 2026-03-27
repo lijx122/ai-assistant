@@ -226,6 +226,93 @@ sessionRouter.put('/:id', async (c) => {
     return c.json({ success: true });
 });
 
+// GET /api/sessions/:id/export - 导出会话为 Markdown
+sessionRouter.get('/:id/export', (c) => {
+    const sessionId = c.req.param('id');
+    const format = c.req.query('format') || 'md';
+    const db = getDb();
+
+    // 验证会话存在
+    const session = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as any;
+    if (!session) return c.json({ error: 'Session not found' }, 404);
+
+    // 获取所有消息
+    const rows = db.prepare(
+        'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+    ).all(sessionId) as any[];
+
+    if (format === 'json') {
+        return c.json({
+            session: {
+                id: session.id,
+                title: session.title,
+                started_at: session.started_at,
+                ended_at: session.ended_at,
+            },
+            messages: rows.map(r => ({
+                ...r,
+                content: parseContent(r.content),
+            })),
+        });
+    }
+
+    // 格式化 Markdown
+    const lines = [];
+    lines.push(`# ${session.title || '会话记录'}`);
+    lines.push('');
+    lines.push(`**开始时间**: ${new Date(session.started_at).toLocaleString('zh-CN')}`);
+    if (session.ended_at) {
+        lines.push(`**结束时间**: ${new Date(session.ended_at).toLocaleString('zh-CN')}`);
+    }
+    lines.push('');
+
+    for (const msg of rows) {
+        const role = msg.role === 'user' ? '👤 用户' : '🤖 Claude';
+        const time = new Date(msg.created_at).toLocaleString('zh-CN');
+        lines.push(`## ${role} | ${time}`);
+        lines.push('');
+
+        const content = parseContent(msg.content);
+        if (typeof content === 'string') {
+            lines.push(content);
+        } else if (Array.isArray(content)) {
+            for (const block of content) {
+                if (block.type === 'text') {
+                    lines.push(block.text);
+                } else if (block.type === 'tool_use') {
+                    lines.push(`> **工具调用**: ${block.name}`);
+                    lines.push('```json');
+                    lines.push(JSON.stringify(block.input || {}, null, 2));
+                    lines.push('```');
+                    if (block.output) {
+                        lines.push('**输出**:');
+                        lines.push('```');
+                        try {
+                            const output = typeof block.output === 'string'
+                                ? JSON.parse(block.output)
+                                : block.output;
+                            lines.push(JSON.stringify(output, null, 2));
+                        } catch {
+                            lines.push(String(block.output));
+                        }
+                        lines.push('```');
+                    }
+                }
+            }
+        }
+        lines.push('');
+        lines.push('---');
+        lines.push('');
+    }
+
+    const markdown = lines.join('\n');
+    const filename = `${(session.title || '会话记录').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_${sessionId.slice(0, 8)}.md`;
+
+    c.header('Content-Type', 'text/markdown; charset=utf-8');
+    c.header('Content-Disposition', `attachment; filename="${filename}"`);
+    return c.body(markdown);
+});
+
 // POST /api/sessions/:id/archive - 手动归档会话
 sessionRouter.post('/:id/archive', async (c) => {
     const id = c.req.param('id');

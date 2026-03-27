@@ -170,6 +170,34 @@
             class="absolute inset-0 p-1"
             :class="currentTerminalIdx === idx ? 'block' : 'hidden'"/>
         </div>
+        <!-- 搜索框 -->
+        <div v-if="searchVisible"
+          class="flex items-center gap-2 px-3 py-2 border-t border-white/10 shrink-0"
+          style="background:#252535;">
+          <input ref="searchInputEl"
+            v-model="searchQuery"
+            @input="onSearchInput"
+            @keydown="handleSearchInput"
+            placeholder="搜索..."
+            class="flex-1 bg-white/10 text-white text-[11px] px-3 py-1.5
+                   rounded outline-none border border-white/20 font-mono
+                   placeholder-white/30 focus:border-oxygen-blue/50"/>
+          <button @click="doSearch('prev')"
+            class="p-1.5 rounded hover:bg-white/10 text-white/50 hover:text-white/80 transition-colors"
+            title="上一个">
+            <ChevronUp class="w-3.5 h-3.5"/>
+          </button>
+          <button @click="doSearch('next')"
+            class="p-1.5 rounded hover:bg-white/10 text-white/50 hover:text-white/80 transition-colors"
+            title="下一个">
+            <ChevronDown class="w-3.5 h-3.5"/>
+          </button>
+          <button @click="hideSearch"
+            class="p-1.5 rounded hover:bg-white/10 text-white/50 hover:text-white/80 transition-colors"
+            title="关闭 (Esc)">
+            <X class="w-3.5 h-3.5"/>
+          </button>
+        </div>
         <!-- 底部状态栏 -->
         <div class="flex items-center justify-between px-3 py-1
                     border-t border-white/5 shrink-0"
@@ -230,10 +258,11 @@ import { api } from '../api'
 import * as monaco from 'monaco-editor'
 import { Terminal as XTerm } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import {
   FilePlus, FolderPlus, RefreshCw, FileCode,
-  Save, Terminal, Plus, X, Trash2, Pencil
+  Save, Terminal, Plus, X, Trash2, Pencil, ChevronUp, ChevronDown
 } from 'lucide-vue-next'
 import FileTreeNode from '../components/FileTreeNode.vue'
 
@@ -263,6 +292,11 @@ const terminals = ref([])
 const terminalEls = ref([])
 const currentTerminalIdx = ref(0)
 const cwd = ref('')
+
+// ── 搜索状态 ──
+const searchVisible = ref(false)
+const searchQuery = ref('')
+const searchInputEl = ref(null)
 
 // ── localStorage 工具函数（记录用户主动关闭的终端）──
 function getClosedTerminalIds() {
@@ -534,6 +568,7 @@ async function createTerminal() {
       id: terminalId,
       xterm,
       fitAddon,
+      searchAddon: null,
       ws: null,
     }
     terminals.value.push(term)
@@ -555,6 +590,25 @@ async function createTerminal() {
     xterm.open(el)
     await nextTick()
     fitAddon.fit()
+
+    // 加载搜索插件
+    const searchAddon = new SearchAddon()
+    xterm.loadAddon(searchAddon)
+    term.searchAddon = searchAddon
+
+    // 注册 Ctrl+F 搜索快捷键
+    xterm.attachCustomKeyEventHandler((e) => {
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault()
+        showSearch()
+        return false
+      }
+      if (e.key === 'Escape' && searchVisible.value) {
+        hideSearch()
+        return false
+      }
+      return true
+    })
 
     // 连接 WS（挂载成功后再连）
     connectTerminalWS(term)
@@ -696,7 +750,7 @@ async function restoreTerminals() {
       const fitAddon = new FitAddon()
       xterm.loadAddon(fitAddon)
 
-      const termObj = { id: terminalId, xterm, fitAddon, ws: null }
+      const termObj = { id: terminalId, xterm, fitAddon, searchAddon: null, ws: null }
       terminals.value.push(termObj)
     }
 
@@ -711,6 +765,23 @@ async function restoreTerminals() {
         if (el) {
           terminals.value[i].xterm.open(el)
           terminals.value[i].fitAddon.fit()
+          // 加载搜索插件
+          const searchAddon = new SearchAddon()
+          terminals.value[i].xterm.loadAddon(searchAddon)
+          terminals.value[i].searchAddon = searchAddon
+          // 注册 Ctrl+F 搜索快捷键
+          terminals.value[i].xterm.attachCustomKeyEventHandler((e) => {
+            if (e.ctrlKey && e.key === 'f') {
+              e.preventDefault()
+              showSearch()
+              return false
+            }
+            if (e.key === 'Escape' && searchVisible.value) {
+              hideSearch()
+              return false
+            }
+            return true
+          })
           connectTerminalWS(terminals.value[i])
         } else {
           console.error('[Terminal] DOM element not found for index', i)
@@ -747,6 +818,48 @@ function handleWindowResize() {
       }))
     }
   }
+}
+
+// ── 终端搜索 ──
+
+function showSearch() {
+  searchVisible.value = true
+  searchQuery.value = ''
+  nextTick(() => {
+    searchInputEl.value?.focus()
+  })
+}
+
+function hideSearch() {
+  searchVisible.value = false
+  searchQuery.value = ''
+  const term = terminals.value[currentTerminalIdx.value]
+  if (term?.searchAddon) {
+    term.searchAddon.clearDecorations()
+  }
+}
+
+function doSearch(direction) {
+  const term = terminals.value[currentTerminalIdx.value]
+  if (!term?.searchAddon || !searchQuery.value) return
+  const found = term.searchAddon.findNext(searchQuery.value, { direction })
+  if (!found) {
+    term.xterm.clearSelection()
+  }
+}
+
+function handleSearchInput(e) {
+  if (e.key === 'Enter') {
+    doSearch('next')
+  } else if (e.key === 'Escape') {
+    hideSearch()
+  }
+}
+
+function onSearchInput() {
+  const term = terminals.value[currentTerminalIdx.value]
+  if (!term?.searchAddon || !searchQuery.value) return
+  term.searchAddon.findNext(searchQuery.value, { direction: 'next' })
 }
 
 // ── 拖拽分割线 ──
