@@ -1,6 +1,10 @@
 <template>
   <!-- 移动端：全屏布局 -->
-  <div v-if="isMobile" class="flex flex-col h-full">
+  <div v-if="isMobile"
+    class="flex flex-col h-full"
+    @dragover.prevent="isDraggingOver = true"
+    @dragleave.prevent="handleDragLeave"
+    @drop.prevent="handleGlobalDrop">
 
     <!-- 顶部工具栏（移动端） -->
     <div class="flex items-center justify-between px-4 py-2 bg-white border-b border-slate-100 shrink-0">
@@ -191,7 +195,10 @@
   <!-- ═══════════════════════════════════════════════════════════════ -->
   <!-- 桌面/平板布局                                                  -->
   <!-- ═══════════════════════════════════════════════════════════════ -->
-  <div v-else class="flex flex-1 min-h-0 gap-3">
+  <div v-else class="flex flex-1 min-h-0 gap-3"
+    @dragover.prevent="isDraggingOver = true"
+    @dragleave.prevent="handleDragLeave"
+    @drop.prevent="handleGlobalDrop">
 
     <!-- 左侧会话列表（平板隐藏） -->
     <div v-if="!isTablet"
@@ -506,49 +513,15 @@
         </template>
         <!-- 正常输入模式 -->
         <template v-else>
-          <!-- 附件列表 -->
-          <div v-if="attachments.length > 0"
-            @dragover.prevent="isDraggingOver = true"
-            @dragleave.prevent="isDraggingOver = false"
-            @drop.prevent="handleFileDrop"
-            :class="['w-full rounded-xl border transition-colors mb-2',
-                     isDraggingOver
-                       ? 'border-oxygen-blue bg-oxygen-blue/5'
-                       : 'border-transparent']">
-            <div class="flex items-center gap-2 px-3 py-2">
-              <button @click="removeAttachment(attachments.length - 1)"
-                class="hover:text-red-500 transition-colors">
-                <X class="w-3.5 h-3.5 text-slate-400"/>
-              </button>
-              <FileIcon class="w-3.5 h-3.5 text-slate-400 shrink-0"/>
-              <span class="text-[11px] text-slate-600 truncate flex-1">
-                {{ attachments[attachments.length - 1].name }}
-              </span>
-              <span v-if="attachments.length > 1"
-                class="text-[10px] text-slate-400">
-                +{{ attachments.length - 1 }}
-              </span>
-            </div>
-          </div>
-          <!-- 拖放区域（无附件时显示） -->
-          <div v-if="attachments.length === 0"
-            @dragover.prevent="isDraggingOver = true"
-            @dragleave.prevent="isDraggingOver = false"
-            @drop.prevent="handleFileDrop"
-            :class="['w-full rounded-xl border-2 border-dashed transition-colors mb-2',
-                     isDraggingOver
-                       ? 'border-oxygen-blue bg-oxygen-blue/5'
-                       : 'border-transparent hover:border-slate-200']">
-          </div>
-          <!-- 附件按钮 + 输入框 -->
-          <div class="flex items-end gap-3">
-            <label class="shrink-0 mb-2 hover:opacity-70 transition-opacity cursor-pointer">
-              <input type="file" multiple class="hidden"
-                @change="handleFileSelect"
-                accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html,.xml,.yaml,.yml"/>
-              <Paperclip class="w-[18px] h-[18px] opacity-40"/>
-            </label>
-            <textarea ref="inputEl"
+          <!-- 附件按钮 -->
+          <label class="shrink-0 mb-2 hover:opacity-70 transition-opacity cursor-pointer">
+            <input type="file" multiple class="hidden"
+              @change="handleFileSelect"
+              accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html,.xml,.yaml,.yml"/>
+            <Paperclip class="w-[18px] h-[18px] opacity-40"/>
+          </label>
+          <!-- 输入框 -->
+          <textarea ref="inputEl"
             v-model="inputText"
             rows="1"
             placeholder="向 Claude 下达指令… 输入 / 查看命令"
@@ -558,8 +531,7 @@
                    padding:10px 14px 14px;line-height:1.6;"
             @keydown="handleKeydown"
             @input="autoResize">
-            </textarea>
-          </div>
+          </textarea>
         <!-- 深度研究模式选择 -->
         <div class="relative">
           <button @click="drPickerOpen = !drPickerOpen"
@@ -860,6 +832,23 @@ async function handleFileDrop(e) {
   isDraggingOver.value = false
   const files = Array.from(e.dataTransfer.files)
   await processFiles(files)
+}
+
+// 全局拖放处理（整个页面）
+function handleGlobalDrop(e) {
+  isDraggingOver.value = false
+  const files = Array.from(e.dataTransfer.files)
+  if (files.length > 0) {
+    processFiles(files)
+  }
+}
+
+// 拖拽离开（检测是否真正离开页面）
+function handleDragLeave(e) {
+  // 只有真正离开窗口时才关闭
+  if (!e.relatedTarget || !e.currentTarget.contains(e.relatedTarget)) {
+    isDraggingOver.value = false
+  }
 }
 
 async function handleFileSelect(e) {
