@@ -314,23 +314,31 @@
         <!-- 正常输入模式 -->
         <template v-else>
           <!-- 附件列表 -->
-          <div v-if="attachments.length > 0" class="w-full mb-2">
-            <div class="flex flex-wrap gap-2">
-              <div v-for="(att, idx) in attachments" :key="idx"
-                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl
-                       bg-slate-100 border border-slate-200 text-[11px]">
-                <FileIcon class="w-3.5 h-3.5 text-slate-400 shrink-0"/>
-                <span class="text-slate-600 truncate max-w-24">{{ att.name }}</span>
-                <span class="text-slate-400 text-[9px]">{{ formatFileSize(att.size) }}</span>
-                <button @click="removeAttachment(idx)"
-                  class="ml-1 hover:text-red-500 transition-colors">
-                  <X class="w-3 h-3"/>
-                </button>
-              </div>
+          <div v-if="attachments.length > 0"
+            @dragover.prevent="isDraggingOver = true"
+            @dragleave.prevent="isDraggingOver = false"
+            @drop.prevent="handleFileDrop"
+            :class="['w-full rounded-xl border transition-colors mb-2',
+                     isDraggingOver
+                       ? 'border-oxygen-blue bg-oxygen-blue/5'
+                       : 'border-transparent']">
+            <div class="flex items-center gap-2 px-3 py-2">
+              <button @click="removeAttachment(attachments.length - 1)"
+                class="hover:text-red-500 transition-colors">
+                <X class="w-3.5 h-3.5 text-slate-400"/>
+              </button>
+              <FileIcon class="w-3.5 h-3.5 text-slate-400 shrink-0"/>
+              <span class="text-[11px] text-slate-600 truncate flex-1">
+                {{ attachments[attachments.length - 1].name }}
+              </span>
+              <span v-if="attachments.length > 1"
+                class="text-[10px] text-slate-400">
+                +{{ attachments.length - 1 }}
+              </span>
             </div>
           </div>
-          <!-- 拖放区域 -->
-          <div
+          <!-- 拖放区域（无附件时显示） -->
+          <div v-if="attachments.length === 0"
             @dragover.prevent="isDraggingOver = true"
             @dragleave.prevent="isDraggingOver = false"
             @drop.prevent="handleFileDrop"
@@ -338,19 +346,16 @@
                      isDraggingOver
                        ? 'border-oxygen-blue bg-oxygen-blue/5'
                        : 'border-transparent hover:border-slate-200']">
-            <label :class="['flex items-center gap-2 px-3 py-2 cursor-pointer text-[11px]',
-                             isDraggingOver ? 'text-oxygen-blue' : 'text-slate-400 hover:text-slate-600']">
-              <Paperclip class="w-4 h-4"/>
-              <span>{{ isDraggingOver ? '松开以添加附件' : '拖放文件或点击添加' }}</span>
+          </div>
+          <!-- 附件按钮 + 输入框 -->
+          <div class="flex items-end gap-3">
+            <label class="shrink-0 mb-2 hover:opacity-70 transition-opacity cursor-pointer">
               <input type="file" multiple class="hidden"
                 @change="handleFileSelect"
                 accept=".txt,.md,.json,.js,.ts,.tsx,.jsx,.py,.go,.rs,.java,.c,.cpp,.h,.css,.html,.xml,.yaml,.yml"/>
+              <Paperclip class="w-[18px] h-[18px] opacity-40"/>
             </label>
-          </div>
-          <button class="shrink-0 mb-3 hover:opacity-70 transition-opacity">
-            <Paperclip class="w-[18px] h-[18px] opacity-40"/>
-          </button>
-          <textarea ref="inputEl"
+            <textarea ref="inputEl"
             v-model="inputText"
             rows="1"
             placeholder="向 Claude 下达指令… 输入 / 查看命令"
@@ -360,7 +365,8 @@
                    padding:10px 14px 14px;line-height:1.6;"
             @keydown="handleKeydown"
             @input="autoResize">
-          </textarea>
+            </textarea>
+          </div>
         <!-- 深度研究模式选择 -->
         <div class="relative">
           <button @click="drPickerOpen = !drPickerOpen"
