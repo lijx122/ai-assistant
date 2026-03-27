@@ -341,3 +341,89 @@ sessionRouter.post('/:id/archive', async (c) => {
         tokens: result.tokens,
     });
 });
+
+// POST /api/sessions/:id/branch - 从指定消息创建分支
+sessionRouter.post('/:id/branch', async (c) => {
+    const sessionId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const { branchFromMessageId } = body;
+    const user = c.get('user');
+
+    if (!branchFromMessageId) {
+        return c.json({ error: 'Missing branchFromMessageId' }, 400);
+    }
+
+    const db = getDb();
+
+    // 验证原会话存在
+    const originalSession = db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId) as any;
+    if (!originalSession) {
+        return c.json({ error: 'Session not found' }, 404);
+    }
+
+    // 验证分支点消息存在且属于该会话
+    const branchPoint = db.prepare(
+        'SELECT * FROM messages WHERE id = ? AND session_id = ?'
+    ).get(branchFromMessageId, sessionId) as any;
+    if (!branchPoint) {
+        return c.json({ error: 'Branch message not found in this session' }, 404);
+    }
+
+    // 事务：创建分支
+    const result = db.transaction(() => {
+        // 1. 创建新会话
+        const newSessionId = randomUUID();
+        const now = Date.now();
+        db.prepare(
+            'INSERT INTO sessions (id, workspace_id, user_id, channel, title, started_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+        ).run(newSessionId, originalSession.workspace_id, user.userId, originalSession.channel || 'web', `${originalSession.title || '新会话'} (分支)`, now, now);
+
+        // 2. 复制分支点及之前的消息
+        const messagesToCopy = db.prepare(
+            'SELECT * FROM messages WHERE session_id = ? AND created_at <= ? ORDER BY created_at ASC'
+        ).all(sessionId, branchPoint.created_at) as any[];
+
+        const oldToNewMsgIds = new Map<string, string>(); // 旧ID -> 新ID 映射
+
+        for (const msg of messagesToCopy) {
+            const newMsgId = randomUUID();
+            oldToNewMsgIds.set(msg.id, newMsgId);
+            db.prepare(
+                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, message_id, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            ).run(newMsgId, newSessionId, originalSession.workspace_id, msg.user_id, msg.role, msg.content, null, msg.status, msg.created_at);
+        }
+
+        // 3. 复制 compact 快照（如果有）
+        const compacts = db.prepare(
+            'SELECT * FROM session_compacts WHERE session_id = ?'
+        ).all(sessionId) as any[];
+
+        for (const compact of compacts) {
+            // 只复制分支点之前的 compact
+            if (compact.compacted_at <= branchPoint.created_at) {
+                db.prepare(
+                    'INSERT INTO session_compacts (id, session_id, workspace_id, compacted_at, summary, compacted_messages, original_tokens, compacted_tokens) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                ).run(
+                    randomUUID(),
+                    newSessionId,
+                    originalSession.workspace_id,
+                    compact.compacted_at,
+                    compact.summary,
+                    compact.compacted_messages,
+                    compact.original_tokens,
+                    compact.compacted_tokens
+                );
+            }
+        }
+
+        return { newSessionId, messagesCopied: messagesToCopy.length };
+    })();
+
+    console.log(`[Branch] Created branch ${result.newSessionId} from session ${sessionId}, copied ${result.messagesCopied} messages`);
+
+    return c.json({
+        success: true,
+        newSessionId: result.newSessionId,
+        messagesCopied: result.messagesCopied,
+    });
+});

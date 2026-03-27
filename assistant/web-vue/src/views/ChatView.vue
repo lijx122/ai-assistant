@@ -163,11 +163,25 @@
             </div>
             <!-- 用户消息编辑按钮 -->
             <div v-if="msg.role === 'user' && !msg.id.startsWith('temp-')"
-              class="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              class="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+              <button @click="startBranchMessage(msg)"
+                class="p-1 rounded-lg bg-white/80 shadow-sm hover:bg-green-50 transition-colors"
+                title="从这条消息创建分支">
+                <GitBranch class="w-3.5 h-3.5 text-green-600"/>
+              </button>
               <button @click="startEditMessage(msg)"
                 class="p-1 rounded-lg bg-white/80 shadow-sm hover:bg-white transition-colors"
                 title="编辑消息">
                 <Pencil class="w-3.5 h-3.5 text-slate-500"/>
+              </button>
+            </div>
+            <!-- AI 消息分支按钮 -->
+            <div v-if="msg.role === 'assistant' && !store.isStreaming"
+              class="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button @click="startBranchMessage(msg)"
+                class="p-1 rounded-lg bg-white/80 shadow-sm hover:bg-green-50 transition-colors"
+                title="从这条消息创建分支">
+                <GitBranch class="w-3.5 h-3.5 text-green-600"/>
               </button>
             </div>
           </div>
@@ -427,7 +441,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -554,6 +568,30 @@ async function submitEditMessage() {
     workspaceId: store.currentWorkspace.id,
     content: newContent,
   })
+}
+
+// ── 分支功能 ──
+
+async function startBranchMessage(msg) {
+  if (!store.currentSession) return
+
+  try {
+    const data = await api.post(`/api/sessions/${store.currentSession.id}/branch`, {
+      branchFromMessageId: msg.id,
+    })
+
+    if (data?.success && data.newSessionId) {
+      // 切换到新分支会话
+      await loadSessions()
+      // 找到新创建的会话并选中
+      const newSession = sessions.value.find(s => s.id === data.newSessionId)
+      if (newSession) {
+        await selectSession(newSession)
+      }
+    }
+  } catch (e) {
+    console.error('[Branch] Failed to create branch:', e)
+  }
 }
 
 // ── 消息处理 ──
