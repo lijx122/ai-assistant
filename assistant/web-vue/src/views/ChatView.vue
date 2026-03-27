@@ -271,7 +271,7 @@
           @input="autoResize">
         </textarea>
         <!-- 深度研究模式选择 -->
-        <div class="relative" ref="drPicker">
+        <div class="relative">
           <button @click="drPickerOpen = !drPickerOpen"
             :class="['flex items-center gap-1.5 px-3 py-1.5 rounded-xl',
                      'text-[11px] font-mono transition-all shrink-0 mb-1 border',
@@ -378,7 +378,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
