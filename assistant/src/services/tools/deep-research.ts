@@ -4,14 +4,26 @@
  * 工具内部自主执行所有研究步骤：多轮搜索 + 内容抓取
  * 返回聚合后的真实研究数据，供 AI 生成报告
  *
+ * 支持三种模式：
+ * - web：网络研究（默认）
+ * - codebase：分析工作区代码
+ * - github：分析 GitHub 项目
+ *
  * @module src/services/tools/deep-research
  */
 
 import type { ToolDefinition, ToolContext, ToolResult } from './types';
 import { executeWebSearch } from './web-search';
 import { executeWebFetch } from './web-fetch';
+import { executeClaudeCode } from './claude-code';
+import { executeBash } from './bash';
 
 const DEFAULT_TIMEOUT_MS = 120000; // 2分钟超时（多轮搜索+抓取）
+
+/**
+ * 研究模式
+ */
+type ResearchMode = 'web' | 'codebase' | 'github';
 
 /**
  * 搜索结果项
@@ -256,20 +268,232 @@ function generateSearchQueries(topic: string, count: number): string[] {
 }
 
 /**
+ * 研究工作区代码
+ */
+async function researchCodebase(
+    workspaceDir: string,
+    topic: string,
+    context: ToolContext
+): Promise<string> {
+    console.log(`[DeepResearch] Analyzing codebase: ${workspaceDir}, topic: ${topic}`);
+
+    const analysisPrompt = `
+分析当前工作区代码库，重点关注：${topic || '整体架构和代码质量'}
+
+请输出：
+1. 项目概述（技术栈、规模、定位）
+2. 目录结构分析（核心模块说明）
+3. 架构设计（主要模块及关系）
+4. 核心依赖（关键第三方库及用途）
+5. 代码质量观察（命名规范、注释、测试覆盖）
+6. 潜在问题或改进点
+7. 亮点设计（值得学习的实现）
+
+要求：基于实际文件内容，引用具体文件路径和代码片段。
+  `.trim();
+
+    try {
+        const result = await executeClaudeCode(
+            { task: analysisPrompt, context: `工作区路径：${workspaceDir}` },
+            context
+        );
+
+        if (result.success && result.data?.output) {
+            return `
+## 工作区代码分析完成
+
+**工作区**：${workspaceDir}
+**分析主题**：${topic || '整体架构'}
+
+---
+
+${result.data.output}
+
+---
+
+请基于以上分析，生成完整的代码分析报告。
+            `.trim();
+        } else {
+            return `
+## 工作区代码分析失败
+
+错误：${result.error || '未知错误'}
+提示：请确保 Claude Code CLI 已安装并可用。
+            `.trim();
+        }
+    } catch (e: any) {
+        console.error('[DeepResearch] Codebase analysis failed:', e);
+        return `
+## 工作区代码分析失败
+
+错误：${e.message}
+        `.trim();
+    }
+}
+
+/**
+ * 研究 GitHub 项目
+ */
+async function researchGitHub(
+    githubUrl: string,
+    cloneDepth: boolean,
+    context: ToolContext,
+    depth: 'quick' | 'standard' | 'deep'
+): Promise<string> {
+    console.log(`[DeepResearch] Analyzing GitHub: ${githubUrl}, clone: ${cloneDepth}`);
+
+    // 标准化 URL
+    let url = githubUrl;
+    if (!url.startsWith('http')) {
+        url = `https://github.com/${githubUrl}`;
+    }
+    const repoName = url.split('/').slice(-2).join('/');
+    const sources: string[] = [];
+    const logs: string[] = [];
+
+    // ── 路径A：网络分析（总是执行）─────────────────────
+
+    logs.push('分析 GitHub 页面...');
+
+    // 1. fetch README
+    const readmeUrl = url
+        .replace('github.com', 'raw.githubusercontent.com')
+        .replace(/\/$/, '') + '/main/README.md';
+    try {
+        const readme = await executeWebFetch(
+            { url: readmeUrl, max_chars: 4000 },
+            context
+        );
+        if (readme.success && readme.data?.content) {
+            sources.push(`## README\n${readme.data.content}`);
+            logs.push('✓ 获取 README 成功');
+        } else {
+            logs.push('✗ README 获取失败');
+        }
+    } catch (e: any) {
+        logs.push(`✗ README 获取异常: ${e.message}`);
+    }
+
+    // 2. GitHub API 获取项目基本信息
+    const apiUrl = url.replace('https://github.com/', 'https://api.github.com/repos/');
+    try {
+        const info = await executeWebFetch(
+            { url: apiUrl, max_chars: 2000 },
+            context
+        );
+        if (info.success && info.data?.content) {
+            sources.push(`## 项目信息\n${info.data.content}`);
+            logs.push('✓ 获取项目元数据成功');
+        } else {
+            logs.push('✗ 项目信息获取失败');
+        }
+    } catch (e: any) {
+        logs.push(`✗ 项目信息获取异常: ${e.message}`);
+    }
+
+    // 3. 搜索项目相关讨论和评测
+    const searchQueries = [
+        `${repoName} github 使用教程 评测`,
+        `${repoName} issue 问题 解决`,
+        `${repoName} 优缺点 对比`,
+    ].slice(0, depth === 'quick' ? 1 : depth === 'standard' ? 2 : 3);
+
+    for (const q of searchQueries) {
+        try {
+            const result = await executeWebSearch(
+                { query: q, num_results: 3 },
+                context
+            );
+            if (result.success && result.data?.results) {
+                sources.push(`## 搜索：${q}\n` +
+                    result.data.results.map((r: any) => `### ${r.title}\n${r.content}`).join('\n\n')
+                );
+                logs.push(`✓ 搜索"${q}"获得 ${result.data.results.length} 条结果`);
+            } else {
+                logs.push(`✗ 搜索"${q}"失败`);
+            }
+        } catch (e: any) {
+            logs.push(`✗ 搜索"${q}"异常: ${e.message}`);
+        }
+    }
+
+    // ── 路径B：Clone 深度分析（可选）───────────────────
+
+    if (cloneDepth) {
+        logs.push('开始 clone 项目进行深度分析...');
+        const tmpDir = `/tmp/deep-research-${Date.now()}`;
+
+        try {
+            // clone（shallow，只取最近1个commit）
+            const cloneResult = await executeBash(
+                { command: `git clone --depth 1 --single-branch "${url}" "${tmpDir}" 2>&1 | tail -5` },
+                context
+            );
+            logs.push(`✓ Clone 完成: ${cloneResult.data?.output?.slice(0, 100) || '成功'}`);
+
+            // 用 claude_code 分析
+            const codeAnalysis = await executeClaudeCode(
+                {
+                    task: `分析以下路径的代码库：${tmpDir}
+请输出：项目架构、核心实现逻辑、代码质量、设计亮点、潜在问题。
+引用具体文件和代码片段。`,
+                    context: `GitHub 项目：${url}`,
+                },
+                context
+            );
+
+            if (codeAnalysis.success && codeAnalysis.data?.output) {
+                sources.push(`## 代码深度分析\n${codeAnalysis.data.output}`);
+                logs.push('✓ 代码分析完成');
+            } else {
+                logs.push('✗ 代码分析失败');
+            }
+
+            // 清理
+            await executeBash(
+                { command: `rm -rf "${tmpDir}"` },
+                context
+            );
+            logs.push('✓ 临时文件已清理');
+
+        } catch (e: any) {
+            logs.push(`✗ Clone 失败: ${e.message}`);
+        }
+    }
+
+    // ── 整理输出 ──
+
+    return `
+## GitHub 项目深度研究完成
+
+**项目**：${url}
+**模式**：${cloneDepth ? '网络分析 + 本地代码分析' : '网络分析'}
+
+**执行日志**：
+${logs.map(l => `- ${l}`).join('\n')}
+
+---
+
+${sources.join('\n\n---\n\n')}
+
+---
+
+**指令**：请基于以上数据，生成完整的项目分析报告。
+报告包含：项目定位、核心功能、技术架构、使用场景、优缺点、与同类项目对比、适用建议。
+    `.trim();
+}
+
+/**
  * 工具定义
  */
 export const deepResearchToolDefinition: ToolDefinition = {
     name: 'deep_research',
-    description: `深度研究工具。工具内部自动执行多轮网络搜索和内容抓取，
-返回聚合后的真实研究数据供你生成报告。
+    description: `深度研究工具。支持三种研究模式：
+- web：网络深度研究（默认），执行多轮搜索和内容抓取
+- codebase：分析当前工作区代码，调用 Claude Code 进行架构分析
+- github：分析 GitHub 项目，支持快速分析和深度分析（含 clone）
 
-特点：
-- 自主生成多角度搜索词
-- 自动去重，合并搜索结果
-- 抓取重要来源的全文内容
-- 返回结构化的研究数据
-
-适用：研究报告、深度分析、市场调研、技术调查。
+适用：研究报告、深度分析、市场调研、技术调查、代码审查。
 不适用：简单事实查询、天气、快速问答。`,
     input_schema: {
         type: 'object',
@@ -283,6 +507,21 @@ export const deepResearchToolDefinition: ToolDefinition = {
                 enum: ['quick', 'standard', 'deep'],
                 description: 'quick=3次搜索(无抓取), standard=5次搜索+2篇全文, deep=8次搜索+4篇全文',
             },
+            mode: {
+                type: 'string',
+                enum: ['web', 'codebase', 'github'],
+                description: 'web=网络研究（默认），codebase=工作区代码分析，github=GitHub项目分析',
+                default: 'web',
+            },
+            github_url: {
+                type: 'string',
+                description: 'GitHub 项目 URL 或 owner/repo 格式，mode=github 时使用',
+            },
+            clone_depth: {
+                type: 'boolean',
+                description: '是否 clone 到本地进行深度代码分析，默认 false（仅分析页面和README）',
+                default: false,
+            },
         },
         required: ['topic'],
     },
@@ -292,11 +531,23 @@ export const deepResearchToolDefinition: ToolDefinition = {
  * 执行深度研究
  */
 export async function executeDeepResearch(
-    input: { topic: string; depth?: 'quick' | 'standard' | 'deep' },
+    input: {
+        topic: string;
+        depth?: 'quick' | 'standard' | 'deep';
+        mode?: 'web' | 'codebase' | 'github';
+        github_url?: string;
+        clone_depth?: boolean;
+    },
     context: ToolContext
 ): Promise<ToolResult> {
     const startTime = Date.now();
-    const { topic, depth = 'standard' } = input;
+    const {
+        topic,
+        depth = 'standard',
+        mode = 'web',
+        github_url,
+        clone_depth = false,
+    } = input;
 
     // 参数校验
     if (!topic || topic.trim().length === 0) {
@@ -307,28 +558,51 @@ export async function executeDeepResearch(
         };
     }
 
-    // 验证搜索服务配置
-    const { getConfig } = await import('../../config');
-    const config = getConfig();
-    const searchBaseUrl = config.tools?.web_search?.base_url;
-
-    if (!searchBaseUrl) {
+    // github 模式校验
+    if (mode === 'github' && !github_url) {
         return {
             success: false,
-            error: '搜索服务未配置：缺少 tools.web_search.base_url',
+            error: 'github 模式需要提供 github_url 参数',
             elapsed_ms: Date.now() - startTime,
         };
     }
 
     try {
-        console.log(`[DeepResearch] Starting research for: ${topic}`);
-        const result = await runDeepResearch(topic.trim(), depth, context);
+        console.log(`[DeepResearch] Starting research: mode=${mode}, topic=${topic}`);
+
+        let result: string;
+
+        if (mode === 'codebase') {
+            // 工作区代码分析模式
+            const workspaceDir = context.cwd || '.';
+            result = await researchCodebase(workspaceDir, topic, context);
+        } else if (mode === 'github') {
+            // GitHub 项目分析模式
+            result = await researchGitHub(github_url!, clone_depth, context, depth);
+        } else {
+            // 原有 web 模式
+            // 验证搜索服务配置
+            const { getConfig } = await import('../../config');
+            const config = getConfig();
+            const searchBaseUrl = config.tools?.web_search?.base_url;
+
+            if (!searchBaseUrl) {
+                return {
+                    success: false,
+                    error: '搜索服务未配置：缺少 tools.web_search.base_url',
+                    elapsed_ms: Date.now() - startTime,
+                };
+            }
+
+            result = await runDeepResearch(topic.trim(), depth, context);
+        }
 
         return {
             success: true,
             data: {
                 topic: topic.trim(),
                 depth,
+                mode,
                 research: result,
             },
             elapsed_ms: Date.now() - startTime,

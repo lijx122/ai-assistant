@@ -270,17 +270,46 @@
           @keydown="handleKeydown"
           @input="autoResize">
         </textarea>
-        <!-- 深度研究开关 -->
-        <button @click="toggleDeepResearch"
-          :class="['shrink-0 mb-3 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[11px]',
-                   'font-mono transition-all border',
-                   deepResearchMode
-                     ? 'bg-oxygen-blue text-white border-oxygen-blue shadow-sm shadow-oxygen-blue/20'
-                     : 'border-slate-200 text-slate-400 hover:border-slate-300']"
-          title="深度研究模式：多轮搜索确保信息全面">
-          <Telescope class="w-3.5 h-3.5"/>
-          <span>{{ deepResearchMode ? '深研中' : '深度研究' }}</span>
-        </button>
+        <!-- 深度研究模式选择 -->
+        <div class="relative" ref="drPicker">
+          <button @click="drPickerOpen = !drPickerOpen"
+            :class="['flex items-center gap-1.5 px-3 py-1.5 rounded-xl',
+                     'text-[11px] font-mono transition-all shrink-0 mb-1 border',
+                     deepResearchMode
+                       ? 'bg-oxygen-blue text-white border-oxygen-blue'
+                       : 'border-slate-200 text-slate-400 hover:border-slate-300']"
+            title="选择研究模式">
+            <Telescope class="w-3.5 h-3.5"/>
+            <span>{{ drModeLabel }}</span>
+            <ChevronDown class="w-3 h-3 opacity-60"/>
+          </button>
+
+          <div v-if="drPickerOpen"
+            class="absolute bottom-full mb-1 left-0 bg-white rounded-2xl
+                   shadow-xl border border-slate-100 py-1.5 min-w-40 z-50">
+            <button @click="setDRMode(null)"
+              class="w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50">
+              关闭深度研究
+            </button>
+            <div class="border-t border-slate-100 my-1"/>
+            <button @click="setDRMode('web')"
+              class="w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50">
+              🌐 网络深度研究
+            </button>
+            <button @click="setDRMode('codebase')"
+              class="w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50">
+              📁 工作区代码分析
+            </button>
+            <button @click="setDRMode('github')"
+              class="w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50">
+              🐙 GitHub 项目分析
+            </button>
+            <button @click="setDRMode('github-deep')"
+              class="w-full text-left px-4 py-2 text-[11px] hover:bg-slate-50">
+              🔬 GitHub 深度分析（含 clone）
+            </button>
+          </div>
+        </div>
         <div class="flex items-center gap-1 opacity-30 shrink-0 mb-3">
           <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">
             ⌘</kbd>
@@ -371,7 +400,16 @@ const isSessionsLoading = ref(true)
 const isTodoLoading = ref(true)
 const messagePaneKey = ref(0)
 const expandedToolBlocks = ref({})
-const deepResearchMode = ref(false)
+const drMode = ref<string | null>(null)
+const drPickerOpen = ref(false)
+const deepResearchMode = computed(() => drMode.value !== null)
+const drModeLabel = computed(() => ({
+  null: '深度研究',
+  web: '网络研究',
+  codebase: '代码分析',
+  github: 'GitHub分析',
+  'github-deep': 'GitHub深研',
+}[drMode.value ?? 'null'] || '深度研究'))
 let ws = null
 let currentMsgId = null
 
@@ -636,8 +674,16 @@ async function sendMessage() {
   }
 
   // 深度研究模式：注入工具调用指令
-  if (deepResearchMode.value) {
-    text = `请使用 deep_research 工具研究以下主题，然后基于返回的真实数据生成完整报告：\n\n${text}`
+  if (drMode.value) {
+    if (drMode.value === 'web') {
+      text = `请使用 deep_research 工具（mode: web）研究：\n\n${text}`
+    } else if (drMode.value === 'codebase') {
+      text = `请使用 deep_research 工具（mode: codebase）分析当前工作区，重点关注：\n\n${text}`
+    } else if (drMode.value === 'github') {
+      text = `请使用 deep_research 工具（mode: github, clone_depth: false）分析项目：\n\n${text}`
+    } else if (drMode.value === 'github-deep') {
+      text = `请使用 deep_research 工具（mode: github, clone_depth: true）深度分析项目（包括 clone 代码）：\n\n${text}`
+    }
   }
 
   // 乐观更新：立即显示用户消息
@@ -668,8 +714,9 @@ async function sendMessage() {
   }
 }
 
-function toggleDeepResearch() {
-  deepResearchMode.value = !deepResearchMode.value
+function setDRMode(mode: string | null) {
+  drMode.value = mode
+  drPickerOpen.value = false
 }
 
 function handleKeydown(e) {

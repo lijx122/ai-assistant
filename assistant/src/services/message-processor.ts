@@ -74,18 +74,24 @@ ${skillCatalog}
     }
 
     // 7. 深度研究模式检测（当用户消息包含深度研究指令时）
-    // deep_research 是真工具，会自动执行搜索+抓取并返回真实数据
+    // deep_research 是真工具，支持三种模式
     if (userContent && userContent.includes('deep_research')) {
         systemPromptParts.push(`
 ---
 【深度研究模式】
-用户请求使用 deep_research 工具。请：
-1. 调用 deep_research 工具，传入用户的具体研究主题
-2. 等待工具返回聚合后的真实研究数据
-3. 基于真实数据（而非猜测）生成完整报告
-4. 报告中必须引用具体的 URL 和数据
+deep_research 工具支持三种模式：
+- web：网络深度研究（默认），执行多轮搜索和内容抓取
+- codebase：分析当前工作区代码，调用 Claude Code 进行架构分析
+- github：分析 GitHub 项目，支持快速分析和深度分析（含 clone）
 
-重要：deep_research 工具会执行真实的网络搜索和内容抓取，请信任并基于返回的数据生成报告。`);
+用户请求使用 deep_research 工具时，请：
+1. 根据用户意图选择合适的 mode（web/codebase/github）
+2. 调用 deep_research 工具，传入用户的具体研究主题和相关参数
+3. 等待工具返回聚合后的真实研究数据
+4. 基于真实数据（而非猜测）生成完整报告
+5. 报告中必须引用具体的 URL、数据或代码片段
+
+重要：deep_research 工具会执行真实的搜索、代码分析或项目分析，请信任并基于返回的数据生成报告。`);
     }
 
     return systemPromptParts.join('\n');
