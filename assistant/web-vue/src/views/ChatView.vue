@@ -714,7 +714,7 @@ async function sendMessage() {
   }
 }
 
-function setDRMode(mode: string | null) {
+function setDRMode(mode) {
   drMode.value = mode
   drPickerOpen.value = false
 }
