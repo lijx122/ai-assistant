@@ -112,7 +112,7 @@
             W
           </div>
           <!-- 消息内容 -->
-          <div :class="['max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed',
+          <div :class="['max-w-[75%] rounded-2xl px-4 py-3 text-sm leading-relaxed relative group',
                         msg.role === 'user'
                           ? 'bg-oxygen-blue text-white rounded-br-sm'
                           : 'bg-white shadow-sm rounded-bl-sm']">
@@ -160,6 +160,15 @@
               class="prose prose-sm max-w-none wb-markdown"
               :class="msg.role === 'user' ? 'prose-invert wb-markdown-user' : ''"
               v-html="renderMarkdown(getTextContent(msg))">
+            </div>
+            <!-- 用户消息编辑按钮 -->
+            <div v-if="msg.role === 'user' && !msg.id.startsWith('temp-')"
+              class="absolute -right-8 top-0 opacity-0 group-hover:opacity-100 transition-opacity">
+              <button @click="startEditMessage(msg)"
+                class="p-1 rounded-lg bg-white/80 shadow-sm hover:bg-white transition-colors"
+                title="编辑消息">
+                <Pencil class="w-3.5 h-3.5 text-slate-500"/>
+              </button>
             </div>
           </div>
           <!-- 用户头像 -->
@@ -262,20 +271,48 @@
       <!-- 输入区 -->
       <div class="tactile-container px-7 py-3 flex items-end gap-6
                   bg-white/40 min-h-[76px] shrink-0">
-        <button class="shrink-0 mb-3 hover:opacity-70 transition-opacity">
-          <Paperclip class="w-[18px] h-[18px] opacity-40"/>
-        </button>
-        <textarea ref="inputEl"
-          v-model="inputText"
-          rows="1"
-          placeholder="向 Claude 下达指令… 输入 / 查看命令"
-          class="flex-1 bg-transparent border-none outline-none font-light
-                 min-w-0 resize-none py-2"
-          style="min-height:44px;max-height:200px;font-size:15px;
-                 padding:10px 14px 14px;line-height:1.6;"
-          @keydown="handleKeydown"
-          @input="autoResize">
-        </textarea>
+        <!-- 编辑模式 -->
+        <template v-if="editingMessage">
+          <button @click="cancelEditMessage"
+            class="shrink-0 mb-3 hover:opacity-70 transition-opacity"
+            title="取消编辑">
+            <X class="w-[18px] h-[18px] text-slate-400"/>
+          </button>
+          <textarea ref="inputEl"
+            v-model="editingText"
+            rows="1"
+            placeholder="编辑消息..."
+            class="flex-1 bg-white/80 border border-oxygen-blue/30 rounded-xl
+                   outline-none font-light min-w-0 resize-none py-2"
+            style="min-height:44px;max-height:200px;font-size:15px;
+                   padding:10px 14px 14px;line-height:1.6;"
+            @input="autoResize">
+          </textarea>
+          <button @click="submitEditMessage"
+            :disabled="store.isStreaming || !editingText.trim()"
+            class="bg-oxygen-blue text-white p-2.5 rounded-2xl shadow-md
+                   shadow-oxygen-blue/20 shrink-0 hover:opacity-90 hover:-translate-y-0.5
+                   transition-all mb-1 disabled:opacity-40 disabled:hover:translate-y-0"
+            title="重新发送">
+            <RotateCcw class="w-4 h-4"/>
+          </button>
+        </template>
+        <!-- 正常输入模式 -->
+        <template v-else>
+          <button class="shrink-0 mb-3 hover:opacity-70 transition-opacity">
+            <Paperclip class="w-[18px] h-[18px] opacity-40"/>
+          </button>
+          <textarea ref="inputEl"
+            v-model="inputText"
+            rows="1"
+            placeholder="向 Claude 下达指令… 输入 / 查看命令"
+            class="flex-1 bg-transparent border-none outline-none font-light
+                   min-w-0 resize-none py-2"
+            style="min-height:44px;max-height:200px;font-size:15px;
+                   padding:10px 14px 14px;line-height:1.6;"
+            @keydown="handleKeydown"
+            @input="autoResize">
+          </textarea>
         <!-- 深度研究模式选择 -->
         <div class="relative">
           <button @click="drPickerOpen = !drPickerOpen"
@@ -328,6 +365,7 @@
                  transition-all mb-1 disabled:opacity-40 disabled:hover:translate-y-0">
           <Send class="w-4 h-4"/>
         </button>
+        </template>
       </div>
     </div>
 
@@ -389,7 +427,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -416,6 +454,10 @@ const drModeLabel = computed(() => ({
   github: 'GitHub分析',
   'github-deep': 'GitHub深研',
 }[drMode.value ?? 'null'] || '深度研究'))
+
+// 编辑重发状态
+const editingMessage = ref(null)  // 正在编辑的消息
+const editingText = ref('')       // 编辑中的文本
 let ws = null
 let currentMsgId = null
 
@@ -468,6 +510,50 @@ async function exportSession(s) {
   const filename = `${(s.title || '会话记录').replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_')}_${s.id.slice(0, 8)}.md`
   // 直接下载
   window.open(`/api/sessions/${s.id}/export`, '_blank')
+}
+
+// ── 编辑重发 ──
+
+function startEditMessage(msg) {
+  editingMessage.value = msg
+  editingText.value = getTextContent(msg) || ''
+}
+
+function cancelEditMessage() {
+  editingMessage.value = null
+  editingText.value = ''
+}
+
+async function submitEditMessage() {
+  if (!editingMessage.value || !editingText.value.trim()) return
+  if (!store.currentSession) return
+
+  const msg = editingMessage.value
+  const newContent = editingText.value.trim()
+
+  // 更新消息内容并删除后续消息
+  await api.put(`/api/chat/messages/${msg.id}`, {
+    content: newContent
+  })
+
+  // 重新加载消息
+  const data = await api.get(`/api/sessions/${store.currentSession.id}/messages`)
+  if (data?.messages) {
+    messages.value = parseMessages(data.messages)
+  }
+
+  // 清除编辑状态
+  editingMessage.value = null
+  editingText.value = ''
+  await nextTick()
+  scrollToBottom()
+
+  // 重新发送消息触发 AI 回复
+  await api.post('/api/chat', {
+    sessionId: store.currentSession.id,
+    workspaceId: store.currentWorkspace.id,
+    content: newContent,
+  })
 }
 
 // ── 消息处理 ──

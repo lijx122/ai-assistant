@@ -589,3 +589,63 @@ chatRouter.get('/confirmations', (c) => {
         })),
     });
 });
+
+// PUT /api/messages/:id - 更新消息内容（用于编辑重发）
+chatRouter.put('/messages/:id', async (c) => {
+    const messageId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const { content } = body;
+
+    if (content === undefined) {
+        return c.json({ error: 'Missing content' }, 400);
+    }
+
+    const db = getDb();
+
+    // 验证消息存在
+    const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
+    if (!message) {
+        return c.json({ error: 'Message not found' }, 404);
+    }
+
+    // 只允许更新 user 消息
+    if (message.role !== 'user') {
+        return c.json({ error: 'Only user messages can be edited' }, 403);
+    }
+
+    // 序列化新内容
+    const serializedContent = serializeContent(content);
+
+    // 更新消息内容
+    db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(serializedContent, messageId);
+
+    // 获取该消息之后的所有消息（包括 AI 回复和后续用户消息），删除它们
+    const deleted = db.prepare(
+        'DELETE FROM messages WHERE session_id = ? AND created_at >= ? AND id != ?'
+    ).run(message.session_id, message.created_at, messageId);
+
+    console.log(`[Message] Updated ${messageId} and deleted ${deleted.changes} subsequent messages`);
+
+    return c.json({ success: true, deletedCount: deleted.changes });
+});
+
+// DELETE /api/messages/:id/response - 删除指定消息后的 AI 回复（保留用户消息）
+chatRouter.delete('/messages/:id/response', (c) => {
+    const messageId = c.req.param('id');
+    const db = getDb();
+
+    // 验证消息存在
+    const message = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as any;
+    if (!message) {
+        return c.json({ error: 'Message not found' }, 404);
+    }
+
+    // 删除该消息之后的所有消息
+    const deleted = db.prepare(
+        'DELETE FROM messages WHERE session_id = ? AND created_at > ?'
+    ).run(message.session_id, message.created_at);
+
+    console.log(`[Message] Deleted ${deleted.changes} messages after ${messageId}`);
+
+    return c.json({ success: true, deletedCount: deleted.changes });
+});
