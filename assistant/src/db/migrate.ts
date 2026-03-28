@@ -288,6 +288,68 @@ const migrations: Migration[] = [
                 ON terminal_sessions(disconnected_at);
         `,
     },
+    {
+        version: 18,
+        name: 'add_sdk_calls_table',
+        sql: `
+            CREATE TABLE IF NOT EXISTS sdk_calls (
+                id TEXT PRIMARY KEY,
+                session_id TEXT,
+                workspace_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                model TEXT NOT NULL,
+                input_tokens INTEGER,
+                output_tokens INTEGER,
+                duration_ms INTEGER,
+                status TEXT NOT NULL,
+                error TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_sdk_calls_workspace ON sdk_calls(workspace_id, created_at);
+        `,
+    },
+    {
+        version: 19,
+        name: 'add_weixin_channel_tables',
+        sql: `
+            CREATE TABLE IF NOT EXISTS weixin_accounts (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                bot_token TEXT NOT NULL,
+                base_url TEXT,
+                status TEXT DEFAULT 'active',
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER
+            );
+            CREATE TABLE IF NOT EXISTS weixin_sessions (
+                id TEXT PRIMARY KEY,
+                qrcode TEXT,
+                qrcode_url TEXT,
+                qrcode_img TEXT,
+                status TEXT DEFAULT 'pending',
+                account_id TEXT,
+                created_at INTEGER NOT NULL,
+                expires_at INTEGER
+            );
+        `,
+    },
+    {
+        version: 21,
+        name: 'add_sessions_status_and_user_id',
+        sql: `
+            -- sessions 表新增 status 和 user_id 字段
+            ALTER TABLE sessions ADD COLUMN status TEXT DEFAULT 'active';
+            ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default';
+        `,
+    },
+    {
+        version: 20,
+        name: 'add_token_fields_to_messages',
+        sql: `
+            ALTER TABLE messages ADD COLUMN input_tokens INTEGER DEFAULT 0;
+            ALTER TABLE messages ADD COLUMN output_tokens INTEGER DEFAULT 0;
+        `,
+    },
 ];
 
 /**

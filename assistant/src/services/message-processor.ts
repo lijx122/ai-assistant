@@ -361,13 +361,13 @@ async function runAgentTaskForChannel(
     let lastSaveTime = Date.now();
     const SAVE_INTERVAL_MS = 1500;
 
-    // 预插入助手占位消息
+    // 预插入助手占位消息（created_at = now + 1，确保在 user 消息之后）
     const assistantMsgId = randomUUID();
     const now = Date.now();
     db.prepare(
         `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', ?)`
-    ).run(assistantMsgId, sessionId, workspaceId, 'owner', 'assistant', '', now);
+    ).run(assistantMsgId, sessionId, workspaceId, 'owner', 'assistant', '', now + 1);
 
     // 写入用户消息
     const userMsgId = randomUUID();
@@ -426,6 +426,8 @@ async function runAgentTaskForChannel(
         const toolResultBlocks: any[] = [];
         let currentText = '';
         let runtimeError: string | null = null;
+        let inputTokens = 0;
+        let outputTokens = 0;
 
         const onEvent: AgentStreamCallback = (type, payload) => {
             // 广播到 WebSocket 客户端
@@ -462,6 +464,9 @@ async function runAgentTaskForChannel(
             } else if (type === 'error') {
                 console.error(`[Processor] Error event received:`, payload);
                 runtimeError = typeof payload === 'string' ? payload : JSON.stringify(payload);
+            } else if (type === 'usage') {
+                inputTokens = payload?.input_tokens ?? 0;
+                outputTokens = payload?.output_tokens ?? 0;
             }
         };
 
@@ -510,8 +515,8 @@ async function runAgentTaskForChannel(
 
         // 记录 SDK 调用
         db.prepare(
-            'INSERT INTO sdk_calls (id, session_id, workspace_id, user_id, model, duration_ms, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(randomUUID(), sessionId, workspaceId, 'owner', 'claude', duration, 'success', Date.now());
+            'INSERT INTO sdk_calls (id, session_id, workspace_id, user_id, model, input_tokens, output_tokens, duration_ms, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(randomUUID(), sessionId, workspaceId, 'owner', 'claude', inputTokens, outputTokens, duration, 'success', Date.now());
 
         // 回复渠道
         const replyContent = streamBuffer.trim() || '[处理完成，无返回内容]';

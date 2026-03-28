@@ -21,11 +21,12 @@ CREATE TABLE IF NOT EXISTS workspaces (
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL,
-  user_id TEXT NOT NULL,
-  channel TEXT NOT NULL,        -- web / lark
+  user_id TEXT NOT NULL DEFAULT 'default',
+  channel TEXT NOT NULL,        -- web / lark / weixin
   lark_chat_id TEXT,            -- 飞书 chat_id，飞书来源时设置
   sdk_session_id TEXT,
   title TEXT,                   -- 会话标题
+  status TEXT DEFAULT 'active', -- active / ended
   started_at INTEGER NOT NULL,
   ended_at INTEGER,
   last_active_at INTEGER        -- 最后活跃时间
