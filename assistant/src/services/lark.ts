@@ -436,17 +436,16 @@ export async function handleLarkBusinessMessage(msg: ChannelMessage): Promise<vo
 
     const wsId = workspaceId;
 
-    // /ws 命令（保留在 lark.ts，因为是飞书特有的）
-    if (textContent.trim().startsWith('/ws ')) {
-        const wsName = textContent.trim().slice(4).trim();
-        const targetWs = db.prepare('SELECT id FROM workspaces WHERE name = ? AND status = ?').get(wsName, 'active') as any;
-        if (targetWs) {
-            chatWorkspaceMap.set(openChatId, targetWs.id);
-            const newSession = getOrCreateSessionForLark(openChatId, targetWs.id);
-            await replyText(messageId, `已切换到工作区「${wsName}」，会话 ID: ${newSession.id.slice(0, 8)}`);
-        } else {
-            await replyText(messageId, `未找到工作区「${wsName}」`);
-        }
+    // /ws 命令 → 构造命令消息，由统一层处理
+    const trimmedContent = textContent.trim();
+    if (trimmedContent.startsWith('/ws ')) {
+        const channelMsg: ChannelMessage = {
+            ...msg,
+            workspaceId: wsId,
+            content: trimmedContent,
+            command: { type: 'workspace_switch', raw: trimmedContent, args: trimmedContent.slice(4).trim() },
+        };
+        await processChannelMessage(channelMsg, wsId);
         return;
     }
 

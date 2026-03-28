@@ -13,6 +13,7 @@ import { buildWorkspaceConfigPrompt } from './workspace-config';
 import { needsRecall, searchHistory, insertMessageFts } from './recall';
 import { archiveSession } from './archiver';
 import { channelManager, ChannelMessage } from '../channels';
+import { Command } from '../channels/base';
 import { webSocketChannel, clearTokenBuffer } from '../channels/websocket';
 import { serializeContent, buildMessagesForSession } from './chat-messages';
 import { broadcastToWorkspace } from '../routes/chat';
@@ -309,6 +310,83 @@ async function handleCommand(
 }
 
 /**
+ * 处理结构化命令（来自各渠道的统一命令格式）
+ * @returns 是否已处理
+ */
+async function handleCommandByType(
+    cmd: Command,
+    msg: ChannelMessage,
+    workspaceId: string
+): Promise<boolean> {
+    const db = getDb();
+
+    switch (cmd.type) {
+        case 'workspace_switch': {
+            // /ws 切换工作区
+            const wsName = cmd.args?.trim();
+            if (!wsName) {
+                await replyToMessage(msg, '用法：/ws <工作区名称>');
+                return true;
+            }
+            const targetWs = db.prepare(
+                'SELECT id, name FROM workspaces WHERE name = ? AND status = ?'
+            ).get(wsName, 'active') as { id: string; name: string } | undefined;
+            if (targetWs) {
+                // 更新渠道特定的工作区映射
+                if (msg.raw?.chatId) {
+                    // 飞书：更新 chatWorkspaceMap
+                    const { larkChannel } = await import('../channels/lark');
+                    (larkChannel as any).chatWorkspaceMap?.set(msg.raw.chatId, targetWs.id);
+                } else if (msg.raw?.accountId) {
+                    // 微信：更新 senderWorkspaceMap
+                    const { weixinChannel } = await import('../channels/weixin');
+                    if (msg.senderId) {
+                        (weixinChannel as any).senderWorkspaceMap?.set(msg.senderId, targetWs.id);
+                    }
+                }
+                await replyToMessage(msg, `✅ 已切换到工作区「${targetWs.name}」`);
+            } else {
+                await replyToMessage(msg, `❌ 未找到工作区「${wsName}」`);
+            }
+            return true;
+        }
+
+        case 'workspace_list': {
+            // /workspaces 列出所有工作区
+            const workspaces = db.prepare(
+                'SELECT name FROM workspaces WHERE status = ? ORDER BY name'
+            ).all('active') as { name: string }[];
+            const list = workspaces.map(w => `• ${w.name}`).join('\n');
+            await replyToMessage(msg, `📋 可用工作区：\n\n${list || '（无）'}\n\n输入 /ws <名称> 切换`);
+            return true;
+        }
+
+        case 'help': {
+            // /help 帮助
+            const helpText = `📖 助手命令：
+
+/ws <名称> - 切换工作区
+/workspaces - 列出所有工作区
+/recall <关键词> - 搜索历史记录
+/archive - 手动归档当前会话
+/help - 显示此帮助
+
+其他问题将转发给 AI 助手处理。`;
+            await replyToMessage(msg, helpText);
+            return true;
+        }
+
+        case 'terminal_block': {
+            // /terminal 等终端命令拦截
+            await replyToMessage(msg, '⚠️ 终端操作请前往 Web 界面。');
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * 处理交互按钮点击
  * 将 actionId 转换为对应文本指令处理
  */
@@ -596,6 +674,28 @@ function markMessageInterrupted(msgId: string, partialContent: string, sessionId
 }
 
 /**
+ * 统一回复函数 - 支持所有渠道
+ */
+async function replyToMessage(msg: ChannelMessage, text: string): Promise<void> {
+    if (msg.raw?.chatId) {
+        // 飞书渠道
+        await sendReply('lark', text, { channel: 'lark', chat_id: msg.raw.chatId, message_id: msg.channelMessageId });
+    } else if (msg.raw?.accountId && msg.raw?.botToken) {
+        // 微信渠道
+        const { sendTextMessage } = await import('../services/weixin/ilink-api');
+        await sendTextMessage(
+            msg.raw.botToken,
+            msg.raw.senderId,
+            text,
+            msg.raw.contextToken
+        );
+    } else {
+        // WebSocket 渠道
+        await webSocketChannel.sendMessage(text, { target: msg.workspaceId });
+    }
+}
+
+/**
  * 统一消息处理入口
  * 所有渠道的消息都通过这个函数处理
  *
@@ -609,8 +709,14 @@ export async function processChannelMessage(
     console.log(`[Processor] Processing message from ${msg.senderId || 'unknown'}, workspace: ${workspaceId}`);
 
     // Log channel message received
-    const channelName = msg.raw?.chatId ? 'lark' : 'websocket';
-    logger.system.info('lark-channel', `Message received from ${msg.senderId || 'unknown'}`, { workspaceId, channel: channelName, contentLength: msg.content?.length || 0 });
+    const channelName = msg.raw?.chatId ? 'lark' : msg.raw?.accountId ? 'weixin' : 'websocket';
+    logger.system.info('channel', `Message received from ${msg.senderId || 'unknown'}`, { workspaceId, channel: channelName, contentLength: msg.content?.length || 0 });
+
+    // 0. 命令消息优先处理（来自各渠道的统一命令）
+    if (msg.command) {
+        const handled = await handleCommandByType(msg.command, msg, workspaceId);
+        if (handled) return;
+    }
 
     // 1. 交互按钮检测（优先级最高，如果是指令或按钮操作则直接返回）
     if (msg.actionId) {
@@ -618,7 +724,7 @@ export async function processChannelMessage(
         if (handled) return;
     }
 
-    // 2. 指令检测（优先级最高）
+    // 2. 指令检测（基于文本的命令）
     const isCommand = await handleCommand(msg, workspaceId);
     if (isCommand) {
         console.log('[Processor] Command handled, skipping AgentRunner');
@@ -628,22 +734,14 @@ export async function processChannelMessage(
     // 3. 拦截终端命令（安全考虑）
     const text = msg.content.trim();
     if (text.startsWith('/terminal') || text.startsWith('/bash')) {
-        const replyText = '请前往 Web 终端面板进行系统级操作。';
-        if (msg.raw?.chatId) {
-            await sendReply('lark', replyText, { channel: 'lark', chat_id: msg.raw.chatId, message_id: msg.channelMessageId });
-        } else {
-            await webSocketChannel.sendMessage(replyText, { target: workspaceId });
-        }
+        await replyToMessage(msg, '请前往 Web 终端面板进行系统级操作。');
         return;
     }
 
     // 4. 调用 AgentRunner 处理
     if (!msg.sessionId) {
         console.error('[Processor] Missing sessionId');
-        const replyText = '系统错误：无法确定会话';
-        if (msg.raw?.chatId) {
-            await sendReply('lark', replyText, { channel: 'lark', chat_id: msg.raw.chatId, message_id: msg.channelMessageId });
-        }
+        await replyToMessage(msg, '系统错误：无法确定会话');
         return;
     }
 

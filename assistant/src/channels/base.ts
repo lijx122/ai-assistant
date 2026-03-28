@@ -35,6 +35,28 @@ export interface ChannelMessage {
     actionId?: string;
     /** 按钮附带数据 */
     actionData?: any;
+    /** 命令类型（若为命令消息） */
+    command?: Command;
+}
+
+/**
+ * 命令类型枚举
+ */
+export type CommandType =
+    | 'workspace_switch'  // /ws 切换工作区
+    | 'workspace_list'    // /workspaces 列出工作区
+    | 'help'              // /help 帮助
+    | 'terminal_block';   // /terminal 等终端命令拦截
+
+/**
+ * 命令结构
+ */
+export interface Command {
+    type: CommandType;
+    /** 命令原始文本 */
+    raw: string;
+    /** 命令参数（如 /ws xxx 中的 xxx） */
+    args?: string;
 }
 
 /**

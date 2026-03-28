@@ -194,61 +194,91 @@ export class WeixinChannel extends Channel {
         db.prepare('UPDATE weixin_accounts SET last_used_at = ? WHERE id = ?')
             .run(Date.now(), account.id);
 
-        // ── 命令处理 ────────────────────────────────────────────────
+        // ── 命令解析 ────────────────────────────────────────────────
         const trimmed = text.trim();
 
-        // /ws 工作区切换命令
+        // 检测命令类型
         if (trimmed.startsWith('/ws ')) {
-            const wsName = trimmed.slice(4).trim();
-            const targetWs = db.prepare(
-                'SELECT id, name FROM workspaces WHERE name = ? AND status = ?'
-            ).get(wsName, 'active') as { id: string; name: string } | undefined;
-            if (targetWs) {
-                this.senderWorkspaceMap.set(senderId, targetWs.id);
-                // 更新旧 session 结束时间
-                const oldSession = db.prepare(`
-                    SELECT id FROM sessions WHERE lark_chat_id = ? AND channel = 'weixin' AND ended_at IS NULL
-                `).get(senderId) as any;
-                if (oldSession) {
-                    db.prepare('UPDATE sessions SET ended_at = ? WHERE id = ?')
-                        .run(Date.now(), oldSession.id);
-                }
-                // 发送回复
-                await ilinkApi.sendTextMessage(account.bot_token, senderId,
-                    `✅ 已切换到工作区「${targetWs.name}」\n\n请发送新消息开始新会话。`, msg.context_token);
-            } else {
-                await ilinkApi.sendTextMessage(account.bot_token, senderId,
-                    `❌ 未找到工作区「${wsName}」`, msg.context_token);
-            }
+            const channelMsg: ChannelMessage = {
+                id: randomUUID(),
+                sessionId: '', // 命令不需要 session
+                workspaceId: this.senderWorkspaceMap.get(senderId) || this.getDefaultWorkspaceId() || '',
+                role: 'user',
+                content: trimmed,
+                createdAt: Date.now(),
+                senderId,
+                command: { type: 'workspace_switch', raw: trimmed, args: trimmed.slice(4).trim() },
+                raw: {
+                    contextToken: msg.context_token,
+                    accountId: account.id,
+                    botToken: account.bot_token,
+                    senderId,
+                },
+            };
+            await this.handleIncomingMessage(channelMsg);
             return;
         }
 
-        // /workspaces 列出所有工作区
         if (trimmed === '/workspaces' || trimmed === '/ws list') {
-            const workspaces = db.prepare(
-                'SELECT name FROM workspaces WHERE status = ? ORDER BY name'
-            ).all('active') as { name: string }[];
-            const list = workspaces.map(w => `• ${w.name}`).join('\n');
-            await ilinkApi.sendTextMessage(account.bot_token, senderId,
-                `📋 可用工作区：\n\n${list || '（无）'}\n\n输入 /ws <名称> 切换`, msg.context_token);
+            const channelMsg: ChannelMessage = {
+                id: randomUUID(),
+                sessionId: '',
+                workspaceId: this.senderWorkspaceMap.get(senderId) || this.getDefaultWorkspaceId() || '',
+                role: 'user',
+                content: trimmed,
+                createdAt: Date.now(),
+                senderId,
+                command: { type: 'workspace_list', raw: trimmed },
+                raw: {
+                    contextToken: msg.context_token,
+                    accountId: account.id,
+                    botToken: account.bot_token,
+                    senderId,
+                },
+            };
+            await this.handleIncomingMessage(channelMsg);
             return;
         }
 
-        // /terminal 等命令拦截
-        if (trimmed.startsWith('/terminal') || trimmed.startsWith('/bash')) {
-            await ilinkApi.sendTextMessage(account.bot_token, senderId,
-                '⚠️ 终端操作请前往 Web 界面。', msg.context_token);
-            return;
-        }
-
-        // /help 帮助
         if (trimmed === '/help' || trimmed === '/?') {
-            await ilinkApi.sendTextMessage(account.bot_token, senderId,
-                `📖 微信助手命令：\n\n` +
-                `/ws <名称> - 切换工作区\n` +
-                `/workspaces - 列出所有工作区\n` +
-                `/help - 显示此帮助\n\n` +
-                `其他问题将转发给 AI 助手处理。`, msg.context_token);
+            const channelMsg: ChannelMessage = {
+                id: randomUUID(),
+                sessionId: '',
+                workspaceId: this.senderWorkspaceMap.get(senderId) || this.getDefaultWorkspaceId() || '',
+                role: 'user',
+                content: trimmed,
+                createdAt: Date.now(),
+                senderId,
+                command: { type: 'help', raw: trimmed },
+                raw: {
+                    contextToken: msg.context_token,
+                    accountId: account.id,
+                    botToken: account.bot_token,
+                    senderId,
+                },
+            };
+            await this.handleIncomingMessage(channelMsg);
+            return;
+        }
+
+        if (trimmed.startsWith('/terminal') || trimmed.startsWith('/bash')) {
+            const channelMsg: ChannelMessage = {
+                id: randomUUID(),
+                sessionId: '',
+                workspaceId: this.senderWorkspaceMap.get(senderId) || this.getDefaultWorkspaceId() || '',
+                role: 'user',
+                content: trimmed,
+                createdAt: Date.now(),
+                senderId,
+                command: { type: 'terminal_block', raw: trimmed },
+                raw: {
+                    contextToken: msg.context_token,
+                    accountId: account.id,
+                    botToken: account.bot_token,
+                    senderId,
+                },
+            };
+            await this.handleIncomingMessage(channelMsg);
             return;
         }
 
