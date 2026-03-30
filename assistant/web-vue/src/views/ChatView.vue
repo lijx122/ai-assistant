@@ -384,6 +384,18 @@
                 <GitBranch class="w-3.5 h-3.5 text-green-600"/>
               </button>
             </div>
+            <!-- Token 消耗显示 -->
+            <div v-if="msg.role === 'assistant' && getMsgTokenUsage(msg)"
+              class="flex items-center gap-3 text-[10px] font-mono text-slate-400 mt-1 pl-1">
+              <span class="flex items-center gap-1">
+                <ArrowDown class="w-3 h-3 text-oxygen-blue/60"/>
+                {{ getMsgTokenUsage(msg).input }}
+              </span>
+              <span class="flex items-center gap-1">
+                <ArrowUp class="w-3 h-3 text-green-500/60"/>
+                {{ getMsgTokenUsage(msg).output }}
+              </span>
+            </div>
           </div>
           <!-- 用户头像 -->
           <div v-if="msg.role === 'user'"
@@ -647,7 +659,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon, Menu
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon, Menu, ArrowDown, ArrowUp
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -664,6 +676,8 @@ const msgList = ref(null)
 const inputEl = ref(null)
 const streamingText = ref('')
 const streamingToolCalls = ref([])  // 流式工具调用列表
+const currentTokenUsage = ref(null)  // 当前消息token消耗 {input, output}
+const msgTokenUsageMap = ref({})  // 消息ID到token消耗的映射
 const autoExecute = ref(false)
 const todoItems = ref([])
 const isSessionsLoading = ref(true)
@@ -776,12 +790,21 @@ async function submitEditMessage() {
   await nextTick()
   scrollToBottom()
 
+  // 初始化流式状态
+  store.isStreaming = true
+  streamingText.value = ''
+  streamingToolCalls.value = []
+  currentTokenUsage.value = null
+
   // 重新发送消息触发 AI 回复
-  await api.post('/api/chat', {
+  const res = await api.post('/api/chat', {
     sessionId: store.currentSession.id,
     workspaceId: store.currentWorkspace.id,
     content: newContent,
   })
+  if (res?.assistantMsgId) {
+    currentMsgId = res.assistantMsgId
+  }
 }
 
 // ── 分支功能 ──
@@ -1072,6 +1095,16 @@ function renderMarkdown(text) {
   return enhanceMarkdownHtml(html)
 }
 
+// 获取消息的 token 消耗（优先从消息数据读取，fallback 到内存 Map）
+function getMsgTokenUsage(msg) {
+  // 如果消息数据中有 token 字段，直接使用（从数据库读取）
+  if (msg && (msg.input_tokens > 0 || msg.output_tokens > 0)) {
+    return { input: msg.input_tokens, output: msg.output_tokens };
+  }
+  // 否则使用内存 Map（实时流式输出）
+  return msgTokenUsageMap.value[msg?.id] || null;
+}
+
 // ── 发送消息 ──
 
 let isSending = false
@@ -1128,13 +1161,18 @@ async function sendMessage() {
   store.isStreaming = true
   streamingText.value = ''
   streamingToolCalls.value = []
+  currentTokenUsage.value = null
 
   try {
-    await api.post('/api/chat', {
+    const res = await api.post('/api/chat', {
       sessionId: store.currentSession.id,
       workspaceId: store.currentWorkspace.id,
       content: finalContent,
     })
+    // 保存 assistantMsgId 用于关联 token 消耗
+    if (res?.assistantMsgId) {
+      currentMsgId = res.assistantMsgId
+    }
   } catch(e) {
     store.isStreaming = false
     isSending = false
@@ -1277,12 +1315,37 @@ function handleWSMessage(msg) {
     // 完成
     case 'done':
       store.isStreaming = false
+      // 重置状态
       currentMsgId = null
+      currentTokenUsage.value = null
       // 重新加载消息获取完整内容
       syncCurrentSessionMessages()
       streamingText.value = ''
       streamingToolCalls.value = []
       loadTodo()
+      break
+
+    // Token 消耗统计
+    case 'usage':
+      if (msg.payload) {
+        const usage = {
+          input: msg.payload.input_tokens || 0,
+          output: msg.payload.output_tokens || 0
+        }
+        currentTokenUsage.value = usage
+        // 如果还没有 currentMsgId，关联到最后一条 assistant 消息
+        if (!currentMsgId && messages.value.length > 0) {
+          const lastAssistant = [...messages.value].reverse().find(m => m.role === 'assistant')
+          if (lastAssistant) {
+            currentMsgId = lastAssistant.id
+          }
+        }
+        // 保存 token 消耗
+        if (currentMsgId) {
+          msgTokenUsageMap.value[currentMsgId] = usage
+        }
+        console.log('[WS] usage:', usage, 'msgId:', currentMsgId)
+      }
       break
 
     case 'error':
@@ -1304,6 +1367,13 @@ function handleWSMessage(msg) {
     case 'confirmation_done':
     case 'confirmation_cancelled':
       console.log('[WS] confirmation event:', msg.type, msg.payload)
+      break
+
+    // 微信渠道事件（转发到全局事件让 WeixinManager 处理）
+    case 'weixin_login_success':
+    case 'weixin_login_expired':
+    case 'weixin_account_status':
+      window.dispatchEvent(new CustomEvent('weixin-ws', { detail: msg }))
       break
   }
 }

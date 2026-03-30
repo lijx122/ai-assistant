@@ -68,6 +68,8 @@ export { webFetchTool, webFetchToolDefinition, executeWebFetch } from './web-fet
 export { deepResearchTool, deepResearchToolDefinition, executeDeepResearch } from './deep-research';
 export { noteWriteTool, noteReadTool, noteSearchTool, noteWriteToolDefinition, noteReadToolDefinition, noteSearchToolDefinition } from './note';
 export { reminderSetTool, reminderSetToolDefinition } from './reminder';
+export { codeSearchTool, codeSearchToolDefinition, executeCodeSearch } from './code-search';
+export { codeAnalyzeTool, codeAnalyzeToolDefinition, executeCodeAnalyze } from './code-analyze';
 
 import { registerTools } from './registry';
 import { bashTool } from './bash';
@@ -83,6 +85,8 @@ import { webFetchTool } from './web-fetch';
 import { deepResearchTool } from './deep-research';
 import { noteWriteTool, noteReadTool, noteSearchTool } from './note';
 import { reminderSetTool } from './reminder';
+import { codeSearchTool } from './code-search';
+import { codeAnalyzeTool } from './code-analyze';
 
 /**
  * 注册所有标准工具
@@ -109,6 +113,8 @@ export function registerAllTools(): void {
         noteReadTool,
         noteSearchTool,
         reminderSetTool,
+        codeSearchTool,
+        codeAnalyzeTool,
     ]);
     console.log('[Tools] All standard tools registered');
 }

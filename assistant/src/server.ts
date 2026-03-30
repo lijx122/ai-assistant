@@ -30,7 +30,8 @@ import { preload as preloadEmbedder } from './services/embedder';
 import { backfillEmbeddings } from './services/message-indexer';
 import { getTerminal, writeToTerminal, onTerminalData, touchTerminal, markTerminalConnected, markTerminalDisconnected, startStaleTerminalCleanup, getTerminalOutputBuffer, initializeTerminal } from './services/terminal';
 import { cleanupDestroyedRunners } from './services/agent-runner';
-import { larkChannel, webSocketChannel } from './channels';
+import { larkChannel, webSocketChannel, weixinChannel } from './channels';
+import { weixinRouter } from './routes/weixin';
 import { getDb } from './db';
 import { logger as appLogger } from './services/logger';
 import { hashSync } from 'bcrypt';
@@ -209,6 +210,7 @@ app.route('/api/files', filesRouter);
 app.route('/api/tasks', taskRouter);
 app.route('/api/todos', todoRouter);
 app.route('/api/internal', internalRouter);
+app.route('/api/weixin', weixinRouter);
 
 // Public Config API - 返回非敏感的默认配置
 app.get('/api/config/public', (c) => {
@@ -429,6 +431,7 @@ if (process.env.NODE_ENV !== 'test') {
         // 注册所有渠道
         channelManager.register(webSocketChannel);
         channelManager.register(larkChannel);
+        channelManager.register(weixinChannel);
 
         // 初始化所有渠道
         await channelManager.initializeAll();

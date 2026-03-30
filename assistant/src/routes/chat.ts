@@ -196,6 +196,8 @@ async function runAgentTask(
         const toolResultBlocks: any[] = [];
         let currentText = '';
         let runtimeError: string | null = null;
+        let inputTokens = 0;
+        let outputTokens = 0;
 
         const onEvent: AgentStreamCallback = (type, payload) => {
             // Broadcast to all connected WebSocket clients
@@ -241,6 +243,9 @@ async function runAgentTask(
             } else if (type === 'error') {
                 console.error(`[Chat] Error event received:`, payload);
                 runtimeError = typeof payload === 'string' ? payload : JSON.stringify(payload);
+            } else if (type === 'usage') {
+                inputTokens = payload?.input_tokens ?? 0;
+                outputTokens = payload?.output_tokens ?? 0;
             }
         };
 
@@ -267,19 +272,19 @@ async function runAgentTask(
         // Finalize the assistant message
         console.log(`[Chat] Finalizing message ${assistantMsgId}, blocks count: ${assistantContentBlocks.length}`);
         if (assistantContentBlocks.length > 0) {
-            finalizeMessage(assistantMsgId, assistantContentBlocks);
+            finalizeMessage(assistantMsgId, assistantContentBlocks, { input: inputTokens, output: outputTokens });
             console.log(`[Chat] Message ${assistantMsgId} finalized successfully`);
         } else {
             if (runtimeError) {
                 const errorContent = [{ type: 'text', text: `执行失败：${runtimeError}` }];
-                finalizeMessage(assistantMsgId, errorContent);
+                finalizeMessage(assistantMsgId, errorContent, { input: inputTokens, output: outputTokens });
                 console.log(`[Chat] Message ${assistantMsgId} finalized with runtime error`);
             } else {
                 // If no content, mark as complete with empty content
                 console.log(`[Chat] No content blocks, marking as complete with empty content`);
                 db.prepare(
-                    `UPDATE messages SET status = 'complete', streaming_content = NULL WHERE id = ?`
-                ).run(assistantMsgId);
+                    `UPDATE messages SET status = 'complete', streaming_content = NULL, input_tokens = ?, output_tokens = ? WHERE id = ?`
+                ).run(inputTokens, outputTokens, assistantMsgId);
             }
         }
 
@@ -299,8 +304,8 @@ async function runAgentTask(
 
         // Record SDK call
         db.prepare(
-            'INSERT INTO sdk_calls (id, session_id, workspace_id, user_id, model, duration_ms, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        ).run(randomUUID(), sessionId, workspaceId, userId, 'claude', duration, 'success', Date.now());
+            'INSERT INTO sdk_calls (id, session_id, workspace_id, user_id, model, input_tokens, output_tokens, duration_ms, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(randomUUID(), sessionId, workspaceId, userId, 'claude', inputTokens, outputTokens, duration, 'success', Date.now());
 
     } catch (e: any) {
         console.error('[Chat] Agent task failed:', e);
@@ -332,12 +337,12 @@ function updateStreamingContent(msgId: string, content: string): void {
 /**
  * Finalize message: save content blocks, clear streaming_content, set status to complete
  */
-function finalizeMessage(msgId: string, contentBlocks: any[]): void {
+function finalizeMessage(msgId: string, contentBlocks: any[], tokens?: { input: number; output: number }): void {
     const db = getDb();
     console.log(`[Chat] Executing finalizeMessage for ${msgId}, content length: ${JSON.stringify(contentBlocks).length}`);
     const result = db.prepare(
-        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete' WHERE id = ?`
-    ).run(serializeContent(contentBlocks), msgId);
+        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete', input_tokens = ?, output_tokens = ? WHERE id = ?`
+    ).run(serializeContent(contentBlocks), tokens?.input || 0, tokens?.output || 0, msgId);
     console.log(`[Chat] finalizeMessage result: changes=${result.changes}`);
 }
 

@@ -122,6 +122,23 @@
           </div>
           <span :class="larkBadge">{{ larkText }}</span>
         </div>
+
+        <!-- 微信 -->
+        <div class="flex items-center justify-between p-3 rounded-xl bg-white/50">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-green-100
+                        flex items-center justify-center">
+              <svg class="w-4 h-4 text-green-600" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8.5 11.5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zM12 6.5c-.83 0-1.5-.67-1.5-1.5S11.17 3.5 12 3.5s1.5.67 1.5 1.5S12.83 6.5 12 6.5zm3.5 5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm-7 0c-.83 0-1.5-.67-1.5-1.5S7.67 8.5 8.5 8.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3.5 5c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm3.5-5c-.83 0-1.5-.67-1.5-1.5S15.17 8.5 16 8.5s1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>
+              </svg>
+            </div>
+            <div>
+              <p class="text-[11px] font-semibold">微信连接</p>
+              <p class="text-[9px] font-mono opacity-40">WeChat Bot</p>
+            </div>
+          </div>
+          <span :class="weixinBadge">{{ weixinText }}</span>
+        </div>
       </div>
     </div>
 
@@ -150,6 +167,9 @@
         </div>
       </div>
     </div>
+
+    <!-- 卡片3.5：微信管理 -->
+    <WeixinManager class="w-full"/>
 
     <!-- 卡片4：任务执行（宽 50%，高 h-48）-->
     <div class="w-full md:w-[calc(50%-10px)] h-48
@@ -228,6 +248,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useAppStore } from '../stores/app'
 import { api } from '../api'
+import WeixinManager from '../components/WeixinManager.vue'
 import {
   BarChart2, Cpu, Brain, MessageCircle,
   CheckCircle, XCircle
@@ -313,6 +334,21 @@ const larkBadge = computed(() => {
   if (!s) return base + ' bg-slate-100 text-slate-400'
   return s.status === 'ok'
     ? base + ' bg-purple-100 text-purple-600'
+    : base + ' bg-slate-100 text-slate-400'
+})
+
+const weixinText = computed(() => {
+  const s = systemData.value?.weixin
+  if (!s) return '加载中'
+  return s.accounts > 0 ? `已连接 (${s.accounts})` : '未连接'
+})
+
+const weixinBadge = computed(() => {
+  const s = systemData.value?.weixin
+  const base = 'text-[10px] font-mono px-2 py-1 rounded-full'
+  if (!s) return base + ' bg-slate-100 text-slate-400'
+  return s.accounts > 0
+    ? base + ' bg-green-100 text-green-600'
     : base + ' bg-slate-100 text-slate-400'
 })
 

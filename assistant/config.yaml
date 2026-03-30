@@ -40,6 +40,10 @@ files:
 lark:
   enabled: true
 
+weixin:
+  enabled: true
+  max_accounts: 5
+
 tasks:
   max_history_per_task: 100
 

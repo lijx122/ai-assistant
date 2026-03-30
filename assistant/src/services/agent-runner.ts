@@ -463,6 +463,16 @@ export class AgentRunner {
             } else if (chunk.type === 'message_stop') {
                 stopReason = (chunk as any).stop_reason || 'end_turn';
                 break;
+            } else if (chunk.type === 'message_delta') {
+                // 发送 usage 事件
+                const usage = (chunk as any).usage;
+                console.log('[AgentRunner] message_delta event, usage:', JSON.stringify(usage));
+                if (usage && onEvent) {
+                    onEvent('usage', {
+                        input_tokens: usage.input_tokens,
+                        output_tokens: usage.output_tokens,
+                    });
+                }
             }
         }
 

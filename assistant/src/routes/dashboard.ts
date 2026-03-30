@@ -7,6 +7,7 @@ import { getConfig } from '../config';
 import { channelManager } from '../channels';
 import { getTerminalStatus } from '../services/terminal';
 import { getLogStats } from '../services/logger';
+import { weixinChannel } from '../channels/weixin';
 
 export const dashboardRouter = new Hono<{ Variables: { user: AuthContext } }>();
 
@@ -29,9 +30,17 @@ dashboardRouter.get('/system', async (c) => {
     // 获取渠道状态
     const channels = channelManager.getStatus();
 
+    // 获取微信账号数量
+    const weixinAccounts = weixinChannel.getAccounts();
+    const weixinStatus = {
+        accounts: weixinAccounts.length,
+        status: weixinAccounts.length > 0 ? 'ok' : 'not_configured',
+    };
+
     return c.json({
         runner: runnerStatus,
         lark: larkStatus,
+        weixin: weixinStatus,
         terminal: terminalStatus,
         channels,
         timestamp: Date.now()

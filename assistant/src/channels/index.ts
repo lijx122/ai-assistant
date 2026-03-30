@@ -19,3 +19,4 @@ export {
 
 export { LarkChannel, larkChannel } from './lark';
 export { WebSocketChannel, webSocketChannel, clearTokenBuffer } from './websocket';
+export { WeixinChannel, weixinChannel } from './weixin';
