@@ -17,12 +17,34 @@ export class GitTracker {
     constructor(private workspaceDir: string) {}
 
     /**
+     * 执行 git 命令，确保在正确的工作区目录下执行
+     * 使用 GIT_DIR 和 GIT_WORK_TREE 强制指定仓库位置
+     */
+    private execGit(cmd: string): string {
+        const gitDir = join(this.workspaceDir, '.git')
+        return execSync(cmd, {
+            cwd: this.workspaceDir,
+            env: {
+                ...process.env,
+                GIT_DIR: gitDir,
+                GIT_WORK_TREE: this.workspaceDir,
+            },
+            stdio: 'pipe',
+        }).toString()
+    }
+
+    /**
      * 确保仓库已初始化
      */
     ensureRepo(): boolean {
-        if (existsSync(join(this.workspaceDir, '.git'))) return true
+        const gitDir = join(this.workspaceDir, '.git')
+        if (existsSync(gitDir)) return true
         try {
-            execSync('git init', { cwd: this.workspaceDir, stdio: 'pipe' })
+            execSync('git init -b main', {
+                cwd: this.workspaceDir,
+                stdio: 'pipe',
+                env: { ...process.env, GIT_DIR: gitDir, GIT_WORK_TREE: this.workspaceDir }
+            })
             execSync('git config user.email "assistant@local"',
                 { cwd: this.workspaceDir, stdio: 'pipe' })
             execSync('git config user.name "AI Assistant"',
@@ -43,17 +65,14 @@ export class GitTracker {
     commit(description: string): string | null {
         if (!this.ensureRepo()) return null
         try {
-            const status = execSync('git status --porcelain',
-                { cwd: this.workspaceDir, stdio: 'pipe' }).toString().trim()
+            const status = this.execGit('git status --porcelain').trim()
             if (!status) return null
 
-            execSync('git add -A', { cwd: this.workspaceDir, stdio: 'pipe' })
+            this.execGit('git add -A')
             const msg = `[AI] ${description}`
                 .replace(/"/g, "'").slice(0, 100)
-            execSync(`git commit -m "${msg}"`,
-                { cwd: this.workspaceDir, stdio: 'pipe' })
-            return execSync('git rev-parse --short HEAD',
-                { cwd: this.workspaceDir, stdio: 'pipe' }).toString().trim()
+            this.execGit(`git commit -m "${msg}"`)
+            return this.execGit('git rev-parse --short HEAD').trim()
         } catch {
             return null
         }
@@ -64,10 +83,9 @@ export class GitTracker {
      */
     getLog(limit = 20): GitCommit[] {
         try {
-            const out = execSync(
-                `git log --oneline --format="%h|||%s|||%ci" -${limit}`,
-                { cwd: this.workspaceDir, stdio: 'pipe' }
-            ).toString().trim()
+            const out = this.execGit(
+                `git log --oneline --format="%h|||%s|||%ci" -${limit}`
+            ).trim()
             if (!out) return []
 
             return out.split('\n')
@@ -77,10 +95,9 @@ export class GitTracker {
                     // 获取该 commit 改动文件数
                     let filesChanged = 0
                     try {
-                        const statOut = execSync(
-                            `git show --stat --oneline ${hash}`,
-                            { cwd: this.workspaceDir, stdio: 'pipe' }
-                        ).toString()
+                        const statOut = this.execGit(
+                            `git show --stat --oneline ${hash}`
+                        )
                         // 解析 "1 file changed, 2 insertions(+)" 格式
                         const match = statOut.match(/(\d+) file/)
                         filesChanged = match ? parseInt(match[1]) : 0
@@ -104,14 +121,12 @@ export class GitTracker {
     revertTo(hash: string): { success: boolean; message: string } {
         try {
             // 保存当前状态到新 commit，方便反悔
-            execSync('git add -A', { cwd: this.workspaceDir, stdio: 'pipe' })
+            this.execGit('git add -A')
             try {
-                execSync('git commit -m "[AI] snapshot before revert"',
-                    { cwd: this.workspaceDir, stdio: 'pipe' })
+                this.execGit('git commit -m "[AI] snapshot before revert"')
             } catch {}
 
-            execSync(`git reset --hard ${hash}`,
-                { cwd: this.workspaceDir, stdio: 'pipe' })
+            this.execGit(`git reset --hard ${hash}`)
             return { success: true, message: `已回滚到 ${hash}` }
         } catch (e: any) {
             return { success: false, message: e.message || '回滚失败' }
@@ -123,9 +138,7 @@ export class GitTracker {
      */
     getDiffStat(hash: string): string {
         try {
-            return execSync(`git show --stat --oneline ${hash}`,
-                { cwd: this.workspaceDir, stdio: 'pipe' }
-            ).toString().trim().slice(0, 500)
+            return this.execGit(`git show --stat --oneline ${hash}`).trim().slice(0, 500)
         } catch {
             return ''
         }
@@ -136,8 +149,7 @@ export class GitTracker {
      */
     hasChanges(): boolean {
         try {
-            const status = execSync('git status --porcelain',
-                { cwd: this.workspaceDir, stdio: 'pipe' }).toString().trim()
+            const status = this.execGit('git status --porcelain').trim()
             return !!status
         } catch {
             return false
