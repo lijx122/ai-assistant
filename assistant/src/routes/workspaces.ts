@@ -219,6 +219,21 @@ workspaceRouter.get('/:id/git', (c) => {
     return c.json({ commits });
 });
 
+// GET /api/workspaces/:id/git/status - 获取当前改动统计
+workspaceRouter.get('/:id/git/status', (c) => {
+    const id = c.req.param('id');
+    const db = getDb();
+
+    const ws = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as any;
+    if (!ws) {
+        return c.json({ error: 'Not found' }, 404);
+    }
+
+    const tracker = getGitTracker(id, ws.root_path);
+    const stats = tracker.getStatus();
+    return c.json({ stats });
+});
+
 // POST /api/workspaces/:id/git/revert - 回滚到指定 commit
 workspaceRouter.post('/:id/git/revert', async (c) => {
     const id = c.req.param('id');

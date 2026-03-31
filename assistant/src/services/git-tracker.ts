@@ -199,6 +199,29 @@ export class GitTracker {
             return false
         }
     }
+
+    /**
+     * 获取当前改动统计
+     */
+    getStatus(): { files: number; insertions: number; deletions: number } {
+        try {
+            const out = this.execGit('git diff --stat').trim()
+            if (!out) return { files: 0, insertions: 0, deletions: 0 }
+
+            // 解析格式: "1 file changed, 2 insertions(+), 1 deletion(-)"
+            const filesMatch = out.match(/(\d+) file/)
+            const insertMatch = out.match(/(\d+) insertion/)
+            const deleteMatch = out.match(/(\d+) deletion/)
+
+            return {
+                files: filesMatch ? parseInt(filesMatch[1]) : 0,
+                insertions: insertMatch ? parseInt(insertMatch[1]) : 0,
+                deletions: deleteMatch ? parseInt(deleteMatch[1]) : 0
+            }
+        } catch {
+            return { files: 0, insertions: 0, deletions: 0 }
+        }
+    }
 }
 
 // 缓存实例，避免重复创建

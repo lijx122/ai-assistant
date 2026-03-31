@@ -344,6 +344,101 @@
       </div>
     </div>
 
+    <!-- 保存进度模态框 -->
+    <Teleport to="body">
+      <div v-if="saveProgressModal.visible"
+        class="fixed inset-0 z-[100] flex items-center justify-center"
+        @click.self="saveProgressModal.visible = false">
+        <!-- 背景遮罩 -->
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm"/>
+
+        <!-- 模态框内容 -->
+        <div class="relative w-80 rounded-2xl shadow-2xl overflow-hidden"
+          style="background: #2d2d3e; border: 1px solid rgba(255,255,255,0.1)">
+          <!-- 标题栏 -->
+          <div class="flex items-center justify-between px-5 py-4 border-b border-white/10">
+            <div class="flex items-center gap-2">
+              <Save class="w-4 h-4 text-green-400"/>
+              <span class="text-sm font-medium text-white">保存进度</span>
+            </div>
+            <button @click="saveProgressModal.visible = false"
+              class="p-1 rounded-lg hover:bg-white/10 text-white/40 hover:text-white/70 transition-colors">
+              <X class="w-4 h-4"/>
+            </button>
+          </div>
+
+          <!-- 表单内容 -->
+          <div class="px-5 py-4 space-y-4">
+            <!-- 标签输入 -->
+            <div>
+              <label class="block text-[11px] font-medium text-white/60 mb-1.5">
+                版本标签 <span class="text-white/30">(可选)</span>
+              </label>
+              <input v-model="saveProgressModal.tag"
+                placeholder="如 v1.0、release、feature"
+                class="w-full px-3 py-2 rounded-lg text-[12px] text-white
+                       bg-white/5 border border-white/10
+                       placeholder-white/30
+                       focus:outline-none focus:border-oxygen-blue/50
+                       focus:bg-white/10 transition-colors"/>
+            </div>
+
+            <!-- 描述输入 -->
+            <div>
+              <label class="block text-[11px] font-medium text-white/60 mb-1.5">
+                提交描述 <span class="text-red-400">*</span>
+              </label>
+              <textarea v-model="saveProgressModal.message"
+                rows="3"
+                placeholder="描述本次保存的内容..."
+                class="w-full px-3 py-2 rounded-lg text-[12px] text-white
+                       bg-white/5 border border-white/10 resize-none
+                       placeholder-white/30
+                       focus:outline-none focus:border-oxygen-blue/50
+                       focus:bg-white/10 transition-colors"/>
+            </div>
+
+            <!-- 改动统计 -->
+            <div v-if="saveProgressModal.stats"
+              class="flex items-center gap-3 text-[10px] text-white/40">
+              <span class="flex items-center gap-1">
+                <FileCode class="w-3 h-3"/>
+                {{ saveProgressModal.stats.files }} 个文件
+              </span>
+              <span class="flex items-center gap-1">
+                <Plus class="w-3 h-3 text-green-400"/>
+                {{ saveProgressModal.stats.insertions }} 行
+              </span>
+              <span class="flex items-center gap-1">
+                <Minus class="w-3 h-3 text-red-400"/>
+                {{ saveProgressModal.stats.deletions }} 行
+              </span>
+            </div>
+          </div>
+
+          <!-- 底部按钮 -->
+          <div class="flex items-center justify-end gap-2 px-5 py-3
+                      border-t border-white/10 bg-black/20">
+            <button @click="saveProgressModal.visible = false"
+              class="px-4 py-1.5 rounded-lg text-[11px] font-medium
+                     text-white/60 hover:text-white hover:bg-white/10 transition-colors">
+              取消
+            </button>
+            <button @click="confirmSaveProgress"
+              :disabled="!saveProgressModal.message.trim() || saveProgressModal.loading"
+              class="flex items-center gap-1.5 px-4 py-1.5 rounded-lg
+                     text-[11px] font-bold
+                     bg-green-500 hover:bg-green-400
+                     text-white transition-colors
+                     disabled:opacity-50 disabled:cursor-not-allowed">
+              <span v-if="saveProgressModal.loading">保存中...</span>
+              <span v-else>保存</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
     <!-- 右键菜单 -->
     <div v-if="contextMenu.visible"
       :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
@@ -391,7 +486,7 @@ import '@xterm/xterm/css/xterm.css'
 import {
   FilePlus, FolderPlus, RefreshCw, FileCode,
   Save, Terminal, Plus, X, Trash2, Pencil, ChevronUp, ChevronDown, Check,
-  GitBranch, RotateCcw
+  GitBranch, RotateCcw, Minus
 } from 'lucide-vue-next'
 import FileTreeNode from '../components/FileTreeNode.vue'
 
@@ -437,6 +532,13 @@ const diffEl = ref(null)
 // ── Git 历史状态 ──
 const gitCommits = ref([])
 const gitLoading = ref(false)
+const saveProgressModal = ref({
+  visible: false,
+  tag: '',
+  message: '',
+  loading: false,
+  stats: null
+})
 
 // ── localStorage 工具函数（记录用户主动关闭的终端）──
 function getClosedTerminalIds() {
@@ -1142,26 +1244,48 @@ async function handleInitGit() {
   }
 }
 
-// 保存进度（带标签和注释）
+// 保存进度（打开模态框）
 async function handleSaveProgress() {
   if (!store.currentWorkspace) return
 
-  // 弹出输入框获取标签和注释
-  const tag = prompt('输入版本标签（如 v1.0）：', 'v1')
-  if (tag === null) return  // 用户取消
+  // 重置模态框状态
+  saveProgressModal.value = {
+    visible: true,
+    tag: '',
+    message: '',
+    loading: false,
+    stats: null
+  }
 
-  const message = prompt('输入提交描述：', '保存当前进度')
-  if (message === null) return  // 用户取消
+  // 获取改动统计
+  try {
+    const result = await api.get(
+      `/api/workspaces/${store.currentWorkspace.id}/git/status`
+    )
+    if (result?.stats) {
+      saveProgressModal.value.stats = result.stats
+    }
+  } catch (e) {
+    console.error('[Git] Get status failed:', e)
+  }
+}
 
-  gitLoading.value = true
+// 确认保存进度
+async function confirmSaveProgress() {
+  if (!store.currentWorkspace) return
+  const { tag, message } = saveProgressModal.value
+  if (!message.trim()) return
+
+  saveProgressModal.value.loading = true
   try {
     const result = await api.post(
       `/api/workspaces/${store.currentWorkspace.id}/git/save`,
       { tag, message }
     )
     if (result.success) {
+      saveProgressModal.value.visible = false
       await loadGitHistory()
-      alert(`保存成功！\n\n标签: ${result.tag}\n版本: ${result.version}\n描述: ${message}`)
+      // 可选：显示成功提示
     } else {
       alert('保存失败：' + (result.message || '未知错误'))
     }
@@ -1169,7 +1293,7 @@ async function handleSaveProgress() {
     console.error('[Git] Save failed:', e)
     alert('保存失败')
   } finally {
-    gitLoading.value = false
+    saveProgressModal.value.loading = false
   }
 }
 
