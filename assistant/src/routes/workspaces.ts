@@ -240,3 +240,61 @@ workspaceRouter.post('/:id/git/revert', async (c) => {
     const result = tracker.revertTo(hash);
     return c.json({ ...result, diffStat });
 });
+
+// POST /api/workspaces/:id/git/init - 初始化 Git 仓库
+workspaceRouter.post('/:id/git/init', (c) => {
+    const id = c.req.param('id');
+    const db = getDb();
+
+    const ws = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as any;
+    if (!ws) {
+        return c.json({ error: 'Not found' }, 404);
+    }
+
+    const tracker = getGitTracker(id, ws.root_path);
+    const success = tracker.ensureRepo();
+
+    if (success) {
+        // 创建初始 commit
+        tracker.commit('init workspace');
+        return c.json({ success: true, message: 'Git 仓库初始化成功' });
+    } else {
+        return c.json({ success: false, message: 'Git 仓库初始化失败' }, 500);
+    }
+});
+
+// POST /api/workspaces/:id/git/save - 保存进度（带标签和注释）
+workspaceRouter.post('/:id/git/save', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const { tag, message } = body;
+
+    if (!message) {
+        return c.json({ error: 'message is required' }, 400);
+    }
+
+    const db = getDb();
+    const ws = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as any;
+    if (!ws) {
+        return c.json({ error: 'Not found' }, 404);
+    }
+
+    const tracker = getGitTracker(id, ws.root_path);
+
+    // 确保仓库已初始化
+    tracker.ensureRepo();
+
+    // 创建带标签的 commit
+    const commitHash = tracker.commitWithTag(message, tag || '');
+
+    if (commitHash) {
+        return c.json({
+            success: true,
+            tag: tag || '',
+            version: commitHash,
+            message
+        });
+    } else {
+        return c.json({ success: false, message: '没有可提交的改动，或提交失败' }, 400);
+    }
+});

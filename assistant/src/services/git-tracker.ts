@@ -79,6 +79,50 @@ export class GitTracker {
     }
 
     /**
+     * 创建带标签的 commit
+     * @param message 提交描述
+     * @param tag 标签（可选）
+     * @returns commit hash 或 null（无改动）
+     */
+    commitWithTag(message: string, tag: string): string | null {
+        if (!this.ensureRepo()) return null
+        try {
+            // 检查是否有改动
+            const status = this.execGit('git status --porcelain').trim()
+            if (!status) return null
+
+            // 添加所有文件
+            this.execGit('git add -A')
+
+            // 格式化提交信息
+            const prefix = tag ? `[${tag}] ` : ''
+            const commitMsg = `${prefix}${message}`.replace(/"/g, "'").slice(0, 100)
+
+            // 提交
+            this.execGit(`git commit -m "${commitMsg}"`)
+            const hash = this.execGit('git rev-parse --short HEAD').trim()
+
+            // 创建标签（如果指定了）
+            if (tag) {
+                try {
+                    this.execGit(`git tag -a "${tag}" -m "${tag}: ${message}"`)
+                } catch {
+                    // 标签可能已存在，尝试更新
+                    try {
+                        this.execGit(`git tag -a "${tag}" -m "${tag}: ${message}" -f`)
+                    } catch {
+                        // 忽略标签创建失败
+                    }
+                }
+            }
+
+            return hash
+        } catch {
+            return null
+        }
+    }
+
+    /**
      * 获取最近 N 条 commit 记录
      */
     getLog(limit = 20): GitCommit[] {

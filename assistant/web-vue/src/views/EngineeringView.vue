@@ -316,12 +316,31 @@
         </div>
       </div>
 
-      <!-- 底部：当前 HEAD 信息 -->
-      <div v-if="gitCommits.length"
-        class="px-3 py-2 border-t border-white/5 shrink-0">
+      <!-- 底部：操作按钮 -->
+      <div class="px-3 py-2 border-t border-white/5 shrink-0 space-y-1.5">
         <p class="text-[9px] font-mono text-white/20">
-          {{ gitCommits.length }} 次提交
+          {{ gitCommits.length ? `${gitCommits.length} 次提交` : '未初始化 Git' }}
         </p>
+        <button v-if="!gitCommits.length"
+          @click="handleInitGit"
+          :disabled="gitLoading"
+          class="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg
+                 bg-oxygen-blue/20 hover:bg-oxygen-blue/30
+                 text-oxygen-blue text-[10px] font-bold transition-colors
+                 disabled:opacity-50">
+          <GitBranch class="w-3 h-3"/>
+          <span>{{ gitLoading ? '初始化中...' : '初始化 Git' }}</span>
+        </button>
+        <button v-else
+          @click="handleSaveProgress"
+          :disabled="gitLoading"
+          class="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg
+                 bg-green-500/20 hover:bg-green-500/30
+                 text-green-400 text-[10px] font-bold transition-colors
+                 disabled:opacity-50">
+          <Save class="w-3 h-3"/>
+          <span>{{ gitLoading ? '保存中...' : '保存进度' }}</span>
+        </button>
       </div>
     </div>
 
@@ -417,6 +436,7 @@ const diffEl = ref(null)
 
 // ── Git 历史状态 ──
 const gitCommits = ref([])
+const gitLoading = ref(false)
 
 // ── localStorage 工具函数（记录用户主动关闭的终端）──
 function getClosedTerminalIds() {
@@ -1095,6 +1115,61 @@ async function loadGitHistory() {
     if (data?.commits) gitCommits.value = data.commits
   } catch (e) {
     console.error('[Git] Load history failed:', e)
+  }
+}
+
+// 初始化 Git 仓库
+async function handleInitGit() {
+  if (!store.currentWorkspace) return
+  if (!confirm('初始化 Git 仓库？\n\n将在当前工作区创建 .git 目录。')) return
+
+  gitLoading.value = true
+  try {
+    const result = await api.post(
+      `/api/workspaces/${store.currentWorkspace.id}/git/init`
+    )
+    if (result.success) {
+      await loadGitHistory()
+      alert('Git 仓库初始化成功！')
+    } else {
+      alert('初始化失败：' + (result.message || '未知错误'))
+    }
+  } catch (e) {
+    console.error('[Git] Init failed:', e)
+    alert('初始化失败')
+  } finally {
+    gitLoading.value = false
+  }
+}
+
+// 保存进度（带标签和注释）
+async function handleSaveProgress() {
+  if (!store.currentWorkspace) return
+
+  // 弹出输入框获取标签和注释
+  const tag = prompt('输入版本标签（如 v1.0）：', 'v1')
+  if (tag === null) return  // 用户取消
+
+  const message = prompt('输入提交描述：', '保存当前进度')
+  if (message === null) return  // 用户取消
+
+  gitLoading.value = true
+  try {
+    const result = await api.post(
+      `/api/workspaces/${store.currentWorkspace.id}/git/save`,
+      { tag, message }
+    )
+    if (result.success) {
+      await loadGitHistory()
+      alert(`保存成功！\n\n标签: ${result.tag}\n版本: ${result.version}\n描述: ${message}`)
+    } else {
+      alert('保存失败：' + (result.message || '未知错误'))
+    }
+  } catch (e) {
+    console.error('[Git] Save failed:', e)
+    alert('保存失败')
+  } finally {
+    gitLoading.value = false
   }
 }
 
