@@ -5,6 +5,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve, dirname, normalize } from 'path';
 import { getDb } from '../db';
+import { getGitTracker } from './git-tracker';
 
 // 工具定义
 export const readFileToolDefinition = {
@@ -124,6 +125,15 @@ export function executeWriteFile(workspaceId: string, input: { path: string; con
     writeFileSync(filePath, content, 'utf8');
 
     console.log(`[FileTool] ${existed ? 'Updated' : 'Created'}: ${relativePath} (${content.length} bytes)`);
+
+    // 自动 commit
+    try {
+        const tracker = getGitTracker(workspaceId, workspaceRoot)
+        const action = existed ? '更新' : '创建'
+        tracker.commit(`${action} ${relativePath}`)
+    } catch (e) {
+        console.warn('[FileTool] Auto commit failed:', e)
+    }
 
     return {
         path: relativePath,

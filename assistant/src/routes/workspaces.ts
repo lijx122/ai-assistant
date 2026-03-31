@@ -6,6 +6,7 @@ import { resolve } from 'path';
 import { authMiddleware } from '../middleware/auth';
 import { AuthContext } from '../types';
 import { getConfig } from '../config';
+import { getGitTracker } from '../services/git-tracker';
 import {
     loadWorkspaceConfigFiles,
     saveWorkspaceConfigFile,
@@ -201,4 +202,41 @@ workspaceRouter.put('/:id/config', async (c) => {
         console.error('[WorkspaceConfig] Failed to save config:', err);
         return c.json({ error: 'Failed to save config: ' + err.message }, 500);
     }
+});
+
+// GET /api/workspaces/:id/git - 获取 git 历史
+workspaceRouter.get('/:id/git', (c) => {
+    const id = c.req.param('id');
+    const db = getDb();
+
+    const ws = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as any;
+    if (!ws) {
+        return c.json({ error: 'Not found' }, 404);
+    }
+
+    const tracker = getGitTracker(id, ws.root_path);
+    const commits = tracker.getLog(30);
+    return c.json({ commits });
+});
+
+// POST /api/workspaces/:id/git/revert - 回滚到指定 commit
+workspaceRouter.post('/:id/git/revert', async (c) => {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const { hash } = body;
+
+    if (!hash) {
+        return c.json({ error: 'hash is required' }, 400);
+    }
+
+    const db = getDb();
+    const ws = db.prepare('SELECT * FROM workspaces WHERE id = ?').get(id) as any;
+    if (!ws) {
+        return c.json({ error: 'Not found' }, 404);
+    }
+
+    const tracker = getGitTracker(id, ws.root_path);
+    const diffStat = tracker.getDiffStat(hash);
+    const result = tracker.revertTo(hash);
+    return c.json({ ...result, diffStat });
 });

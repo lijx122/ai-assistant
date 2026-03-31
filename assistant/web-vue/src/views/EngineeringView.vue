@@ -67,7 +67,7 @@
       </div>
     </div>
 
-    <!-- 右侧：编辑器 + 终端 -->
+    <!-- 中间：编辑器 + 终端 -->
     <div class="flex-1 flex flex-col min-h-0 min-w-0">
 
       <!-- 编辑器面板 -->
@@ -253,6 +253,78 @@
       </div>
     </div>
 
+    <!-- 右侧 Git 历史面板 -->
+    <div class="w-56 flex flex-col overflow-hidden shrink-0"
+      style="background:#1e1e2e; border-left: 1px solid rgba(255,255,255,0.05)">
+
+      <!-- 标题栏 -->
+      <div class="flex items-center justify-between px-3 py-2.5
+                  border-b border-white/5 shrink-0">
+        <div class="flex items-center gap-1.5">
+          <GitBranch class="w-3.5 h-3.5 text-white/40"/>
+          <span class="text-[10px] font-mono text-white/40 uppercase tracking-wider">
+            Git 历史
+          </span>
+        </div>
+        <button @click="loadGitHistory"
+          class="p-1 rounded hover:bg-white/10 text-white/30
+                 hover:text-white/60 transition-colors">
+          <RefreshCw class="w-3 h-3"/>
+        </button>
+      </div>
+
+      <!-- commit 列表 -->
+      <div class="flex-1 overflow-y-auto no-scrollbar py-1">
+        <div v-if="!gitCommits.length"
+          class="text-[10px] font-mono text-white/20 text-center py-6">
+          暂无提交记录
+        </div>
+
+        <div v-for="(commit, idx) in gitCommits" :key="commit.hash"
+          class="group relative px-3 py-2 hover:bg-white/5
+                 cursor-pointer transition-colors border-b border-white/3">
+
+          <!-- commit 信息 -->
+          <div class="flex items-center gap-2 mb-0.5">
+            <span class="text-[9px] font-mono text-oxygen-blue shrink-0">
+              {{ commit.hash }}
+            </span>
+            <span v-if="idx === 0"
+              class="text-[8px] font-mono bg-green-500/20 text-green-400
+                     px-1 rounded">
+              HEAD
+            </span>
+          </div>
+          <p class="text-[10px] font-mono text-white/60 truncate leading-relaxed">
+            {{ commit.message.replace('[AI] ', '') }}
+          </p>
+          <p class="text-[9px] font-mono text-white/20 mt-0.5">
+            {{ commit.date }}
+          </p>
+
+          <!-- hover 时显示回滚按钮 -->
+          <button v-if="idx > 0"
+            @click.stop="handleRevert(commit)"
+            class="absolute right-2 top-1/2 -translate-y-1/2
+                   opacity-0 group-hover:opacity-100 transition-opacity
+                   flex items-center gap-1 px-2 py-1 rounded-lg
+                   bg-amber-500/20 hover:bg-amber-500/30
+                   text-amber-400 text-[9px] font-mono">
+            <RotateCcw class="w-3 h-3"/>
+            回滚
+          </button>
+        </div>
+      </div>
+
+      <!-- 底部：当前 HEAD 信息 -->
+      <div v-if="gitCommits.length"
+        class="px-3 py-2 border-t border-white/5 shrink-0">
+        <p class="text-[9px] font-mono text-white/20">
+          {{ gitCommits.length }} 次提交
+        </p>
+      </div>
+    </div>
+
     <!-- 右键菜单 -->
     <div v-if="contextMenu.visible"
       :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }"
@@ -299,7 +371,8 @@ import { SearchAddon } from '@xterm/addon-search'
 import '@xterm/xterm/css/xterm.css'
 import {
   FilePlus, FolderPlus, RefreshCw, FileCode,
-  Save, Terminal, Plus, X, Trash2, Pencil, ChevronUp, ChevronDown, Check
+  Save, Terminal, Plus, X, Trash2, Pencil, ChevronUp, ChevronDown, Check,
+  GitBranch, RotateCcw
 } from 'lucide-vue-next'
 import FileTreeNode from '../components/FileTreeNode.vue'
 
@@ -341,6 +414,9 @@ const diffOldContent = ref('')
 const diffNewContent = ref('')
 const diffFilePath = ref('')
 const diffEl = ref(null)
+
+// ── Git 历史状态 ──
+const gitCommits = ref([])
 
 // ── localStorage 工具函数（记录用户主动关闭的终端）──
 function getClosedTerminalIds() {
@@ -1009,6 +1085,54 @@ function getLanguageFromPath(path) {
   return langMap[ext] || 'plaintext'
 }
 
+// ── Git 历史 ──
+
+async function loadGitHistory() {
+  if (!store.currentWorkspace) return
+  try {
+    const data = await api.get(
+      `/api/workspaces/${store.currentWorkspace.id}/git`)
+    if (data?.commits) gitCommits.value = data.commits
+  } catch (e) {
+    console.error('[Git] Load history failed:', e)
+  }
+}
+
+async function handleRevert(commit) {
+  // 显示确认信息
+  const diffInfo = commit.filesChanged > 0
+    ? `\n\n将影响约 ${commit.filesChanged} 个文件` : ''
+  if (!confirm(
+    `回滚到：${commit.hash}\n${commit.message}\n\n` +
+    `⚠️ 此后的所有改动将丢失${diffInfo}\n\n确认回滚？`
+  )) return
+
+  try {
+    const result = await api.post(
+      `/api/workspaces/${store.currentWorkspace.id}/git/revert`,
+      { hash: commit.hash }
+    )
+
+    if (result.success) {
+      // 刷新文件树和 git 历史
+      await refreshTree()
+      await loadGitHistory()
+      // 如果有打开的文件，提示重新加载
+      if (currentFilePath.value) {
+        const reloadMsg = '文件已被回滚，是否重新加载编辑器？'
+        if (confirm(reloadMsg)) {
+          await openFile({ path: currentFilePath.value, type: 'file' })
+        }
+      }
+    } else {
+      alert('回滚失败：' + result.message)
+    }
+  } catch (e) {
+    console.error('[Git] Revert failed:', e)
+    alert('回滚失败：' + (e.message || '未知错误'))
+  }
+}
+
 // 监听来自 AI 的文件修改事件（通过 WebSocket）
 // 可通过 window.showFileDiff = showDiff 暴露给外部调用
 
@@ -1021,11 +1145,15 @@ onMounted(async () => {
   if (store.currentWorkspace) {
     await loadFileTree()
     await restoreTerminals()
+    await loadGitHistory()
   }
 })
 
 watch(() => store.currentWorkspace, async (ws) => {
-  if (ws) await loadFileTree()
+  if (ws) {
+    await loadFileTree()
+    await loadGitHistory()
+  }
 }, { immediate: false })
 
 onUnmounted(() => {
