@@ -18,6 +18,7 @@ import { webSocketChannel, clearTokenBuffer } from '../channels/websocket';
 import { serializeContent, buildMessagesForSession } from './chat-messages';
 import { broadcastToWorkspace } from '../routes/chat';
 import { indexMessage } from './message-indexer';
+import { deliveryQueue } from './channel-delivery';
 import { logger } from './logger';
 
 /**
@@ -596,10 +597,32 @@ async function runAgentTaskForChannel(
             'INSERT INTO sdk_calls (id, session_id, workspace_id, user_id, model, input_tokens, output_tokens, duration_ms, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         ).run(randomUUID(), sessionId, workspaceId, 'owner', 'claude', inputTokens, outputTokens, duration, 'success', Date.now());
 
-        // 回复渠道
+        // 回复渠道（统一通过 deliveryQueue 可靠投递）
         const replyContent = streamBuffer.trim() || '[处理完成，无返回内容]';
-        if (msg.raw?.chatId) {
-            await sendReply('lark', replyContent, { channel: 'lark', chat_id: msg.raw.chatId, message_id: msg.channelMessageId });
+
+        if (msg.raw?.accountId) {
+            // 微信：通过 deliveryQueue 可靠发送（带重试）
+            deliveryQueue.enqueue({
+                sessionId,
+                channelType: 'weixin',
+                senderId: msg.raw.senderId || '',
+                botToken: msg.raw.botToken,
+                contextToken: msg.raw.contextToken,
+                workspaceId,
+            });
+        } else if (msg.raw?.chatId) {
+            // 飞书：通过 deliveryQueue 可靠发送（带重试）
+            deliveryQueue.enqueue({
+                sessionId,
+                channelType: 'lark',
+                senderId: msg.senderId || '',
+                messageId: msg.channelMessageId,
+                chatId: msg.raw.chatId,
+                workspaceId,
+            });
+        } else {
+            // WebSocket：直接发送（无重试需求）
+            await sendReply('lark', replyContent);
         }
 
     } catch (e: any) {
@@ -613,10 +636,10 @@ async function runAgentTaskForChannel(
 
         broadcastToWorkspace(workspaceId, { type: 'error', payload: e.message || 'Execution Error' });
 
-        // 回复错误到渠道
+        // WebSocket 错误通知（微信/飞书错误由 deliveryQueue 在全部重试失败后发送提示）
         const errorMsg = `执行错误：${e.message}`;
-        if (msg.raw?.chatId) {
-            await sendReply('lark', errorMsg, { channel: 'lark', chat_id: msg.raw.chatId, message_id: msg.channelMessageId });
+        if (!msg.raw?.accountId && !msg.raw?.chatId) {
+            await sendReply('lark', errorMsg);
         }
     } finally {
         // 确保 token 缓存被清空（即使出错）

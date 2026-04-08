@@ -332,10 +332,8 @@ export class LarkChannel extends Channel {
 
             console.log('[LarkChannel] Calling handleIncomingMessage, hasHandler:', !!this.messageHandler);
 
-            // 触发上层处理器
+            // 触发上层处理器（命令/AI 处理 → 回复由 processChannelMessage 末尾统一投递）
             await this.handleIncomingMessage(channelMsg);
-
-            console.log('[LarkChannel] handleIncomingMessage completed');
         } catch (err: any) {
             console.error('[LarkChannel] handleLarkMessage error:', err.message, err.stack);
         }

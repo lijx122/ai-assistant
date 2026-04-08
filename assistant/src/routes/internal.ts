@@ -9,6 +9,7 @@ import { Hono } from 'hono';
 import { getDb } from '../db';
 import { createAlert, handleAlert, attemptFix, ignoreAlert } from '../services/alert-handler';
 import { randomUUID } from 'crypto';
+import { deliveryQueue } from '../services/channel-delivery';
 
 export const internalRouter = new Hono();
 
@@ -203,5 +204,20 @@ internalRouter.post('/alerts/:id/ignore', async (c) => {
             success: false,
             error: err.message || 'Failed to ignore alert',
         }, 500);
+    }
+});
+
+// GET /api/internal/delivery/stats
+// 投递队列状态（监控用）
+internalRouter.get('/delivery/stats', (c) => {
+    try {
+        const stats = deliveryQueue.getStats();
+        return c.json({
+            success: true,
+            pendingCount: deliveryQueue.getPendingCount(),
+            items: stats,
+        });
+    } catch (err: any) {
+        return c.json({ success: false, error: err.message }, 500);
     }
 });

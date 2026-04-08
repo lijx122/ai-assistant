@@ -336,70 +336,9 @@ export class WeixinChannel extends Channel {
             },
         };
 
-        // 触发上层处理器
+        // 触发上层处理器（命令/AI 均在 processChannelMessage 内部完成，
+        // 微信回复由 processChannelMessage 末尾统一投递，不再在此轮询）
         await this.handleIncomingMessage(channelMsg);
-
-        // 等待处理完成后发送回复
-        const reply = await this.waitForReply(sessionId);
-        if (reply) {
-            try {
-                await ilinkApi.sendTextMessage(
-                    account.bot_token,
-                    senderId,
-                    reply,
-                    msg.context_token
-                );
-                console.log(`[Weixin] Reply sent to ${senderId}`);
-            } catch (e: any) {
-                console.error(`[Weixin] Failed to send reply:`, e.message);
-            }
-        }
-    }
-
-    private waitForReply(sessionId: string): Promise<string | null> {
-        return new Promise((resolve) => {
-            const timeoutMs = 120000; // 2分钟超时
-            const checkInterval = 500;
-
-            const startTime = Date.now();
-            const check = () => {
-                const db = getDb();
-                const messages = db.prepare(`
-                    SELECT content FROM messages
-                    WHERE session_id = ? AND role = 'assistant'
-                    ORDER BY created_at DESC LIMIT 1
-                `).all(sessionId) as any[];
-
-                if (messages.length > 0) {
-                    const content = messages[0].content;
-                    try {
-                        const parsed = JSON.parse(content);
-                        if (Array.isArray(parsed)) {
-                            const text = parsed
-                                .filter((b: any) => b.type === 'text')
-                                .map((b: any) => b.text)
-                                .join('\n');
-                            resolve(text || null);
-                            return;
-                        }
-                    } catch {
-                        // 纯文本
-                        resolve(content || null);
-                        return;
-                    }
-                }
-
-                if (Date.now() - startTime > timeoutMs) {
-                    resolve(null);
-                    return;
-                }
-
-                setTimeout(check, checkInterval);
-            };
-
-            // 等待1秒后再开始检查（给 Agent 处理时间）
-            setTimeout(check, 1000);
-        });
     }
 
     /**
