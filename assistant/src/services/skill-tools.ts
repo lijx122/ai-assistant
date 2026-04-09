@@ -1,47 +1,37 @@
+/**
+ * Skill Tools - 统一导出 skill 相关功能（兼容旧接口）
+ *
+ * @deprecated 请直接使用 src/services/skill-loader.ts
+ */
+
 import {
-    getSkillFilePath as unifiedGetSkillFilePath,
-    readSkillFile as unifiedReadSkillFile,
-    listAvailableSkills as unifiedListAvailableSkills,
-    executeReadSkill as unifiedExecuteReadSkill,
-    readSkillToolDefinition as unifiedReadSkillToolDefinition,
-} from './tools/skill';
-import { getWorkspaceRootPath } from './workspace-config';
+    getSkill as _getSkill,
+    listSkills as _listSkills,
+    loadAllSkills,
+    clearSkillCache,
+    type SkillDefinition,
+} from './skill-loader';
+
+export type { SkillDefinition };
+export { loadAllSkills, clearSkillCache };
 
 export function getSkillFilePath(workspaceId: string, skillName: string): string | null {
-    return unifiedGetSkillFilePath(workspaceId, skillName);
+    // 兼容旧接口：workspaceId 参数不再需要（统一使用 .skills/）
+    const skill = _getSkill(skillName);
+    return skill?.skillDir ? `${skill.skillDir}/SKILL.md` : null;
 }
 
 export function readSkillFile(workspaceId: string, skillName: string): string | null {
-    return unifiedReadSkillFile(workspaceId, skillName);
+    const skill = _getSkill(skillName);
+    return skill?.content || null;
 }
 
 export function listAvailableSkills(workspaceId: string): string[] {
-    return unifiedListAvailableSkills(workspaceId);
+    return _listSkills().map(s => s.name);
 }
 
-export const readSkillToolDefinition = unifiedReadSkillToolDefinition;
+export const readSkillToolDefinition = require('./tools/skill').readSkillToolDefinition;
 
-export function executeReadSkill(workspaceId: string, args: { name: string }): {
-    success: boolean;
-    content: string;
-    source: 'workspace' | 'global' | 'not_found';
-} {
-    const result = unifiedExecuteReadSkill(args, { workspaceId });
-    if (!result.success) {
-        return {
-            success: false,
-            content: result.error || `Failed to read skill "${args.name}"`,
-            source: 'not_found',
-        };
-    }
-
-    const filePath = unifiedGetSkillFilePath(workspaceId, args.name);
-    const workspaceRoot = getWorkspaceRootPath(workspaceId);
-    const source: 'workspace' | 'global' = filePath?.startsWith(workspaceRoot) ? 'workspace' : 'global';
-
-    return {
-        success: true,
-        content: result.data?.content || '',
-        source,
-    };
+export function executeReadSkill(args: { name: string }, context: any): any {
+    return require('./tools/skill').executeReadSkill(args, context);
 }

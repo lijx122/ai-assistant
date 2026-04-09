@@ -20,6 +20,7 @@ import { broadcastToWorkspace } from '../routes/chat';
 import { indexMessage } from './message-indexer';
 import { deliveryQueue } from './channel-delivery';
 import { logger } from './logger';
+import { clearSkillCache } from './skill-loader';
 
 /**
  * 构建 System Prompt
@@ -30,6 +31,10 @@ export async function buildSystemPrompt(
     userContent: string,
     notifyTarget?: any
 ): Promise<string> {
+    // 开发模式：每次对话开始前清除 skill 缓存，确保文件修改即时生效
+    if (process.env.NODE_ENV !== 'production') {
+        clearSkillCache();
+    }
     const workspaceConfigPrompt = buildWorkspaceConfigPrompt(workspaceId);
     const systemPromptParts: string[] = [];
 
@@ -103,17 +108,39 @@ Git：git_history · git_revert
         systemPromptParts.push(workspaceConfigPrompt);
     }
 
-    // 3. 技能目录 (Skill Catalog)
-    const { getSkillCatalog } = await import('./tools/skill');
-    const skillCatalog = getSkillCatalog(workspaceId);
-    if (skillCatalog) {
-        systemPromptParts.push(`
-## Skill Catalog（自动注入）
-以下是系统已发现的可用技能目录（技能名：一句话摘要）：
-${skillCatalog}
+    // 3. Skills 目录（从 .skills/ 动态加载）
+    const { listSkills } = await import('./skill-loader');
+    const allSkills = listSkills();
+    if (allSkills.length > 0) {
+        // 按前缀分组
+        const toolSkills = allSkills.filter(s => s.name.startsWith('tools-'));
+        const otherSkills = allSkills.filter(s => !s.name.startsWith('tools-'));
 
-当任务与某个技能匹配时，先调用 read_skill({"name":"<技能名>"}) 读取完整指南，再执行具体操作。
-不要凭记忆猜测技能内容。`);
+        let skillSection = '## 可用 Skills\n\n';
+        skillSection += '遇到不熟悉的工具或需要了解详细用法时，调用 read_skill 获取完整指南。\n\n';
+
+        if (toolSkills.length) {
+            skillSection += '**工具说明 Skills**（按类别）：\n';
+            for (const s of toolSkills) {
+                skillSection += `- \`read_skill("${s.name}")\`：${s.description}\n`;
+                if (s.whenToUse) {
+                    skillSection += `  触发：${s.whenToUse}\n`;
+                }
+            }
+            skillSection += '\n';
+        }
+
+        if (otherSkills.length) {
+            skillSection += '**任务 Skills**：\n';
+            for (const s of otherSkills) {
+                skillSection += `- \`read_skill("${s.name}")\`：${s.description}\n`;
+                if (s.whenToUse) {
+                    skillSection += `  触发：${s.whenToUse}\n`;
+                }
+            }
+        }
+
+        systemPromptParts.push(skillSection);
     }
 
     // 4. 基础角色定义
