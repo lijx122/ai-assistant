@@ -75,6 +75,33 @@ export class WeixinChannel extends Channel {
         console.log('[Weixin] Shutdown complete');
     }
 
+    canNotify(): boolean {
+        return this.accounts.size > 0;
+    }
+
+    async sendNotification(message: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<boolean> {
+        const emoji = level === 'info' ? '✅' : level === 'warn' ? '⚠️' : '❌';
+        const text = `${emoji} ${message}`;
+
+        const results = await Promise.allSettled(
+            Array.from(this.accounts.values()).map(async (account) => {
+                const db = getDb();
+                const row = db.prepare(
+                    'SELECT last_sender_id FROM weixin_accounts WHERE id = ?'
+                ).get(account.id) as { last_sender_id: string | null } | undefined;
+                const senderId = row?.last_sender_id;
+                if (!senderId) return;
+                await ilinkApi.sendTextMessage(account.bot_token, senderId, text, '');
+            })
+        );
+
+        const failed = results.filter(r => r.status === 'rejected').length;
+        if (failed > 0) {
+            console.warn(`[WeixinChannel] sendNotification: ${failed}/${results.length} accounts failed`);
+        }
+        return failed === 0;
+    }
+
     async sendMessage(text: string, options?: SendOptions): Promise<boolean> {
         // 微信渠道的消息发送由 handleInboundMessage 内部处理
         // 这里主要用于回复确认
@@ -189,10 +216,10 @@ export class WeixinChannel extends Channel {
 
         console.log(`[Weixin] Message from ${senderId}: ${text.slice(0, 50)}`);
 
-        // 更新最后使用时间
+        // 更新最后使用时间和最后发消息的用户
         const db = getDb();
-        db.prepare('UPDATE weixin_accounts SET last_used_at = ? WHERE id = ?')
-            .run(Date.now(), account.id);
+        db.prepare('UPDATE weixin_accounts SET last_used_at = ?, last_sender_id = ? WHERE id = ?')
+            .run(Date.now(), senderId, account.id);
 
         // ── 命令解析 ────────────────────────────────────────────────
         const trimmed = text.trim();

@@ -178,6 +178,30 @@ export abstract class Channel {
     abstract waitReply(timeoutMs?: number): Promise<ReplyResult>;
 
     /**
+     * 检测渠道是否支持主动通知（任务完成/失败时推送）
+     * @returns 是否可以发送通知
+     */
+    canNotify(): boolean {
+        return this.isAvailable();
+    }
+
+    /**
+     * 发送任务通知
+     * @param message 通知内容（格式化好的文本）
+     * @param level 通知级别
+     * @returns 是否发送成功
+     */
+    async sendNotification(message: string, level: 'info' | 'warn' | 'error'): Promise<boolean> {
+        // 默认实现：降级为 sendAlert
+        try {
+            const alertLevel = level === 'info' ? 'info' : level === 'warn' ? 'warning' : 'error';
+            return await this.sendAlert(message, { level: alertLevel });
+        } catch {
+            return false;
+        }
+    }
+
+    /**
      * 发送确认请求（危险操作）
      * 默认实现基于 sendAlert + waitReply
      * @param title 确认标题
@@ -277,6 +301,13 @@ export class ChannelManager {
      */
     getAvailable(): Channel[] {
         return Array.from(this.channels.values()).filter(c => c.isAvailable());
+    }
+
+    /**
+     * 获取所有支持主动通知的渠道
+     */
+    getNotifiableChannels(): Channel[] {
+        return Array.from(this.channels.values()).filter(c => c.canNotify());
     }
 
     /**

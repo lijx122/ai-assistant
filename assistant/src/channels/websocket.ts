@@ -146,6 +146,21 @@ export class WebSocketChannel extends Channel {
         }
     }
 
+    canNotify(): boolean {
+        return this.isAvailable();
+    }
+
+    async sendNotification(message: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<boolean> {
+        const payload = {
+            type: 'task_notification',
+            message,
+            level,
+            timestamp: Date.now(),
+        };
+        this.broadcastToAll(payload);
+        return true;
+    }
+
     /**
      * 发送确认请求（危险操作）
      * 前端展示确认弹窗，用户选择后通过 WebSocket 回复

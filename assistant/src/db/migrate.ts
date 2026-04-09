@@ -343,11 +343,10 @@ const migrations: Migration[] = [
         `,
     },
     {
-        version: 20,
-        name: 'add_token_fields_to_messages',
+        version: 22,
+        name: 'add_last_sender_id_to_weixin_accounts',
         sql: `
-            ALTER TABLE messages ADD COLUMN input_tokens INTEGER DEFAULT 0;
-            ALTER TABLE messages ADD COLUMN output_tokens INTEGER DEFAULT 0;
+            ALTER TABLE weixin_accounts ADD COLUMN last_sender_id TEXT;
         `,
     },
 ];

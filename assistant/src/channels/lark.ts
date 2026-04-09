@@ -39,6 +39,24 @@ export class LarkChannel extends Channel {
         return !!(config.lark?.enabled && config.larkAppId && config.larkAppSecret);
     }
 
+    canNotify(): boolean {
+        return this.isAvailable();
+    }
+
+    async sendNotification(message: string, level: 'info' | 'warn' | 'error' = 'info'): Promise<boolean> {
+        const config = getConfig();
+        const chatId = config.larkDefaultChatId;
+        if (!chatId) {
+            console.warn('[LarkChannel] sendNotification: no defaultChatId configured');
+            return false;
+        }
+
+        const emoji = level === 'info' ? '✅' : level === 'warn' ? '⚠️' : '❌';
+        return this.sendMessage(`${emoji} ${message}`, {
+            target: { channel: 'lark', chat_id: chatId },
+        });
+    }
+
     async initialize(): Promise<void> {
         console.log('[LarkChannel] initialize called, isAvailable:', this.isAvailable());
 

@@ -1,14 +1,13 @@
 import { schedule, ScheduledTask } from 'node-cron';
 import { getDb } from '../db';
-import { pushToTarget } from './lark';
 import { getWorkspaceRootPath } from './workspace-config';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import axios from 'axios';
 import { randomUUID } from 'crypto';
-import { NotifyTarget } from '../types';
 import { createAlert, handleAlert } from './alert-handler';
 import { logger } from './logger';
+import { sendTaskNotification } from './notification';
 
 const execAsync = promisify(exec);
 
@@ -225,17 +224,17 @@ async function executeTask(task: Task): Promise<void> {
         ).run(startedAt, nextRun, newRunCount, newFailCount, task.id);
     }
 
-    // 发送通知
-    const notifyTarget: NotifyTarget | null = task.notify_target ? JSON.parse(task.notify_target) : null;
-    if (notifyTarget) {
-        const duration = endedAt - startedAt;
-        const summary = buildExecutionSummary(task, status, output, error, duration);
-        try {
-            await pushToTarget(notifyTarget, summary);
-        } catch (notifyErr: any) {
-            console.error(`[Cron] Failed to send notification for task ${task.id}:`, notifyErr.message);
-        }
-    }
+    // 发送通知（动态分发到所有已注册且支持通知的渠道）
+    const duration = endedAt - startedAt;
+    sendTaskNotification({
+        task,
+        status,
+        output,
+        error,
+        durationMs: duration,
+    }).catch((notifyErr: any) => {
+        console.error(`[Cron] Failed to send notification for task ${task.id}:`, notifyErr.message);
+    });
 
     // Shell 任务失败且 alert_on_error=true 时，创建告警
     if (task.command_type === 'shell' && status === 'error' && task.alert_on_error) {
