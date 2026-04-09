@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getConfig } from '../config';
 import { getDb } from '../db';
 import { randomUUID } from 'crypto';
+import { messageCache } from './message-cache';
 
 /**
  * Context Summary 模块
@@ -239,6 +240,9 @@ export async function saveCompact(
         }
 
         console.log(`[ContextSummary] Compact 快照已保存: session=${sessionId}, tokens=${originalTokens}→${compactedTokens}`);
+
+        // 失效消息缓存：compact 改变了历史消息结构
+        messageCache.invalidate(sessionId);
     } catch (error) {
         console.error('[ContextSummary] 保存 compact 快照失败:', error);
         // 不抛出错误，允许继续对话
@@ -322,7 +326,8 @@ export async function compactIfNeeded(
     messages: Anthropic.MessageParam[],
     sessionId?: string,
     workspaceId?: string,
-    onEvent?: CompactEventCallback
+    onEvent?: CompactEventCallback,
+    force?: boolean
 ): Promise<CompactResult> {
     const config = getConfig();
     const compactConfig = config.claude.compact;
@@ -345,7 +350,8 @@ export async function compactIfNeeded(
     const tokenLimit = compactConfig.token_limit ?? 60000;
     const ratioThreshold = Math.floor(config.claude.max_tokens * compactConfig.threshold_ratio);
 
-    const shouldCompact = originalTokens > tokenLimit && originalTokens > ratioThreshold;
+    // force=true 时跳过阈值检查，强制执行压缩
+    const shouldCompact = force || (originalTokens > tokenLimit && originalTokens > ratioThreshold);
 
     // 未超过阈值，无需压缩
     if (!shouldCompact) {

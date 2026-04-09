@@ -22,6 +22,7 @@ interface Task {
     status: 'active' | 'paused' | 'completed';
     notify_target: string | null;
     notify_enabled: number;
+    notify_on_success: number;
     alert_on_error: number;
     last_run: number | null;
     next_run: number | null;
@@ -61,7 +62,7 @@ taskRouter.get('/', (c) => {
 
     const tasks = db.prepare(
         `SELECT id, workspace_id, name, type, schedule, command, command_type,
-                status, notify_target, notify_enabled, alert_on_error, last_run, next_run, run_count, fail_count, created_at
+                status, notify_target, notify_enabled, notify_on_success, alert_on_error, last_run, next_run, run_count, fail_count, created_at
          FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`
     ).all(workspaceId) as Task[];
 
@@ -153,12 +154,13 @@ taskRouter.post('/', async (c) => {
     // notify_target 序列化
     const notifyTarget = body.notifyTarget ? JSON.stringify(body.notifyTarget) : null;
     const notifyEnabled = body.notifyEnabled ? 1 : 0;
+    const notifyOnSuccess = body.notifyOnSuccess ? 1 : 0;
     const alertOnError = body.alertOnError ? 1 : 0;
 
     db.prepare(
         `INSERT INTO tasks (id, workspace_id, user_id, name, type, schedule, command, command_type,
-                           status, notify_target, notify_enabled, alert_on_error, last_run, next_run, run_count, fail_count, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?, 0, 0, ?)`
+                           status, notify_target, notify_enabled, notify_on_success, alert_on_error, last_run, next_run, run_count, fail_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, NULL, ?, 0, 0, ?)`
     ).run(
         id,
         body.workspaceId,
@@ -170,6 +172,7 @@ taskRouter.post('/', async (c) => {
         body.commandType,
         notifyTarget,
         notifyEnabled,
+        notifyOnSuccess,
         alertOnError,
         nextRun,
         now
@@ -188,6 +191,7 @@ taskRouter.post('/', async (c) => {
         status: 'active',
         notify_target: notifyTarget,
         notify_enabled: notifyEnabled,
+        notify_on_success: notifyOnSuccess,
         alert_on_error: alertOnError,
         last_run: null,
         next_run: nextRun,
@@ -265,6 +269,11 @@ taskRouter.put('/:id', async (c) => {
     if (body.notifyEnabled !== undefined) {
         updates.push('notify_enabled = ?');
         values.push(body.notifyEnabled ? 1 : 0);
+    }
+
+    if (body.notifyOnSuccess !== undefined) {
+        updates.push('notify_on_success = ?');
+        values.push(body.notifyOnSuccess ? 1 : 0);
     }
 
     if (body.alertOnError !== undefined) {

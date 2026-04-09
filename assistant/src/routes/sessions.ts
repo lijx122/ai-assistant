@@ -7,6 +7,7 @@ import { resolve } from 'path';
 import { existsSync, unlinkSync, rmdirSync } from 'fs';
 import { getAllCompacts } from '../services/context-summary';
 import { archiveSession } from '../services/archiver';
+import { messageCache } from '../services/message-cache';
 
 // 解析 content 字段（支持字符串或 JSON）
 function parseContent(content: string): any {
@@ -140,6 +141,9 @@ sessionRouter.delete('/:id', (c) => {
 
     const { delSession } = deleteSession(id);
 
+    // 失效缓存
+    messageCache.invalidate(id);
+
     if (delSession.changes === 0) {
         console.warn('[Delete] session', id, 'failed: no rows deleted');
         return c.json({ error: 'Session delete failed' }, 500);
@@ -176,23 +180,36 @@ sessionRouter.get('/:id/messages', (c) => {
     const session = db.prepare('SELECT id FROM sessions WHERE id = ?').get(sessionId);
     if (!session) return c.json({ error: 'Session not found' }, 404);
 
+    // ── Step 1：尝试命中缓存 ──
+    const t0 = Date.now();
+    const cached = messageCache.get(sessionId);
+    if (cached) {
+        const elapsed = Date.now() - t0;
+        // 更新最后活跃时间（异步，不阻塞响应）
+        db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(Date.now(), sessionId);
+        console.log(`[Sessions] Cache hit  ${sessionId.slice(0, 8)} | msgs=${cached.messages.length} | ${elapsed}ms`);
+        return c.json({ messages: cached.messages, compacts: cached.compacts, fromCache: true });
+    }
+
+    // ── Step 2：缓存未命中，查数据库 ──
+    const t1 = Date.now();
     const rows = db.prepare(
         'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC'
     ).all(sessionId) as any[];
+    const dbMs = Date.now() - t1;
 
+    const t2 = Date.now();
     // 解析 content JSON
     const messages = rows.map(r => ({
         ...r,
         content: parseContent(r.content),
     }));
+    const parseMs = Date.now() - t2;
 
-    // 更新最后活跃时间
-    db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(Date.now(), sessionId);
-
-    // Bug Fix: 获取所有 compact 快照（支持多条分隔线）
+    // ── Step 3：并行查询 compacts ──
+    const t3 = Date.now();
     const compacts = getAllCompacts(sessionId);
     const formattedCompacts = compacts.map(c => {
-        // 计算该 compact 前后的消息数
         const afterCount = rows.filter(m => m.created_at > c.compacted_at).length;
         const beforeCount = rows.length - afterCount;
         return {
@@ -203,8 +220,19 @@ sessionRouter.get('/:id/messages', (c) => {
             compacted_tokens: c.compacted_tokens,
         };
     });
+    const compactMs = Date.now() - t3;
 
-    return c.json({ messages, compacts: formattedCompacts });
+    // ── Step 4：写入缓存 + 更新活跃时间 ──
+    messageCache.set(sessionId, messages, formattedCompacts);
+    db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(Date.now(), sessionId);
+
+    const totalMs = Date.now() - t0;
+    console.log(
+        `[Sessions] Cache miss ${sessionId.slice(0, 8)} | msgs=${messages.length} | ` +
+        `DB=${dbMs}ms parse=${parseMs}ms compact=${compactMs}ms total=${totalMs}ms`
+    );
+
+    return c.json({ messages, compacts: formattedCompacts, fromCache: false });
 });
 
 // PUT /api/sessions/:id

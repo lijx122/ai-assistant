@@ -396,6 +396,11 @@
                 {{ getMsgTokenUsage(msg).output }}
               </span>
             </div>
+            <!-- 指令响应标记 -->
+            <div v-if="msg.role === 'assistant' && msg.isCommand"
+              class="flex items-center gap-1 text-[10px] font-mono text-slate-400 mt-1 pl-1">
+              <span title="斜杠指令响应">⌘ 命令</span>
+            </div>
           </div>
           <!-- 用户头像 -->
           <div v-if="msg.role === 'user'"
@@ -718,13 +723,17 @@ async function loadSessions() {
 }
 
 async function selectSession(s) {
+  // 已是当前会话，跳过（避免冗余 API 调用）
+  if (store.currentSession?.id === s.id) return
+
   store.setSession(s)
   const data = await api.get(`/api/sessions/${s.id}/messages`)
   if (data?.messages) messages.value = parseMessages(data.messages)
   expandedToolBlocks.value = {}
   messagePaneKey.value += 1
   await nextTick()
-  scrollToBottom()
+  // fromCache=true（缓存命中）时无需滚动，缓存命中 <5ms
+  if (!data?.fromCache) scrollToBottom()
   await loadTodo()
 }
 
@@ -1292,6 +1301,10 @@ function handleWSMessage(msg) {
         } catch {
           call.status = 'done'
         }
+        // todo_write 完成后立即刷新 todo 面板
+        if (call.name === 'todo_write') {
+          loadTodo()
+        }
       }
       nextTick(scrollToBottom)
       break
@@ -1323,6 +1336,26 @@ function handleWSMessage(msg) {
       streamingText.value = ''
       streamingToolCalls.value = []
       loadTodo()
+      break
+
+    // 斜杠指令响应（来自 /help /skills /skill 等，isCommand: true）
+    case 'assistant_message':
+      if (msg.isCommand) {
+        // 停止流式状态
+        store.isStreaming = false
+        streamingText.value = ''
+        streamingToolCalls.value = []
+        // 直接追加到消息列表（不调用 syncCurrentSessionMessages，避免闪烁）
+        const cmdMsg = {
+          id: msg.id || ('cmd-' + Date.now()),
+          role: 'assistant',
+          content: [{ type: 'text', text: msg.content || '' }],
+          status: 'complete',
+          isCommand: true,          // 前端识别用，不显示 token 消耗
+        }
+        messages.value.push(cmdMsg)
+        nextTick(scrollToBottom)
+      }
       break
 
     // Token 消耗统计

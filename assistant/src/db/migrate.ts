@@ -356,6 +356,13 @@ const migrations: Migration[] = [
             ALTER TABLE tasks ADD COLUMN notify_enabled INTEGER DEFAULT 0;
         `,
     },
+    {
+        version: 24,
+        name: 'add_notify_on_success_to_tasks',
+        sql: `
+            ALTER TABLE tasks ADD COLUMN notify_on_success INTEGER DEFAULT 0;
+        `,
+    },
 ];
 
 /**

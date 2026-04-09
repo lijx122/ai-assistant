@@ -16,6 +16,8 @@ import {
     compactIfNeeded
 } from '../services/context-summary';
 import { webSocketChannel, clearTokenBuffer } from '../channels';
+import { messageCache } from '../services/message-cache';
+import { handleSlashCommand } from '../services/commands/slash-commands';
 import { buildSystemPrompt } from '../services/message-processor';
 import { logger } from '../services/logger';
 import { parseContent, serializeContent, buildMessagesForSession } from '../services/chat-messages';
@@ -117,19 +119,46 @@ chatRouter.post('/', async (c) => {
         "UPDATE sessions SET last_active_at = ?, title = COALESCE(NULLIF(title, ''), ?) WHERE id = ?"
     ).run(now, title, sessionId);
 
-    // 3. Pre-insert assistant placeholder message with streaming status
+    // ── 3. 斜杠指令拦截 ──
+    const cmdResult = await handleSlashCommand(content, { sessionId, workspaceId });
+
+    if (cmdResult.handled) {
+        // 指令已处理，写入一条 assistant 响应消息作为记录
+        const cmdMsgId = randomUUID();
+        const cmdContent = serializeContent([{ type: 'text', text: cmdResult.response || '' }]);
+        db.prepare(
+            'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+        ).run(cmdMsgId, sessionId, workspaceId, user.userId, 'assistant', cmdContent, 'complete', now);
+
+        // 通过 WS 广播（前端 isCommand:true 识别为指令响应，不走常规渲染）
+        broadcastToWorkspace(workspaceId, {
+            type: 'assistant_message',
+            id: cmdMsgId,
+            sessionId,
+            role: 'assistant',
+            content: cmdResult.response || '',
+            isCommand: true,
+        });
+
+        // 失效消息缓存（/clear 等改变了消息集）
+        messageCache.invalidate(sessionId);
+
+        return c.json({ success: true, handled: 'command', messageId: cmdMsgId }, 202);
+    }
+
+    // ── 4. Pre-insert assistant placeholder message with streaming status ──
     const assistantMsgId = randomUUID();
     db.prepare(
         `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, created_at)
          VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', ?)`
     ).run(assistantMsgId, sessionId, workspaceId, user.userId, 'assistant', '', now);
 
-    // 4. Enqueue agent task (async, don't wait)
+    // 5. Enqueue agent task (async, don't wait)
     setTimeout(() => {
         runAgentTask(sessionId, workspaceId, assistantMsgId, user.userId);
     }, 0);
 
-    // 5. Return immediately with 202 Accepted
+    // 6. Return immediately with 202 Accepted
     return c.json({ success: true, assistantMsgId }, 202);
 });
 
@@ -272,12 +301,12 @@ async function runAgentTask(
         // Finalize the assistant message
         console.log(`[Chat] Finalizing message ${assistantMsgId}, blocks count: ${assistantContentBlocks.length}`);
         if (assistantContentBlocks.length > 0) {
-            finalizeMessage(assistantMsgId, assistantContentBlocks, { input: inputTokens, output: outputTokens });
+            finalizeMessage(assistantMsgId, assistantContentBlocks, { input: inputTokens, output: outputTokens }, sessionId);
             console.log(`[Chat] Message ${assistantMsgId} finalized successfully`);
         } else {
             if (runtimeError) {
                 const errorContent = [{ type: 'text', text: `执行失败：${runtimeError}` }];
-                finalizeMessage(assistantMsgId, errorContent, { input: inputTokens, output: outputTokens });
+                finalizeMessage(assistantMsgId, errorContent, { input: inputTokens, output: outputTokens }, sessionId);
                 console.log(`[Chat] Message ${assistantMsgId} finalized with runtime error`);
             } else {
                 // If no content, mark as complete with empty content
@@ -336,14 +365,20 @@ function updateStreamingContent(msgId: string, content: string): void {
 
 /**
  * Finalize message: save content blocks, clear streaming_content, set status to complete
+ * 然后使消息缓存失效，下次读取会重新从 DB 加载最新数据。
  */
-function finalizeMessage(msgId: string, contentBlocks: any[], tokens?: { input: number; output: number }): void {
+function finalizeMessage(msgId: string, contentBlocks: any[], tokens?: { input: number; output: number }, sessionId?: string): void {
     const db = getDb();
     console.log(`[Chat] Executing finalizeMessage for ${msgId}, content length: ${JSON.stringify(contentBlocks).length}`);
     const result = db.prepare(
         `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete', input_tokens = ?, output_tokens = ? WHERE id = ?`
     ).run(serializeContent(contentBlocks), tokens?.input || 0, tokens?.output || 0, msgId);
     console.log(`[Chat] finalizeMessage result: changes=${result.changes}`);
+
+    // 失效缓存，确保下次读取 GET /sessions/:id/messages 获取最新内容
+    if (sessionId) {
+        messageCache.invalidate(sessionId);
+    }
 }
 
 /**
@@ -629,6 +664,9 @@ chatRouter.put('/messages/:id', async (c) => {
         'DELETE FROM messages WHERE session_id = ? AND created_at >= ? AND id != ?'
     ).run(message.session_id, message.created_at, messageId);
 
+    // 失效缓存
+    messageCache.invalidate(message.session_id);
+
     console.log(`[Message] Updated ${messageId} and deleted ${deleted.changes} subsequent messages`);
 
     return c.json({ success: true, deletedCount: deleted.changes });
@@ -649,6 +687,9 @@ chatRouter.delete('/messages/:id/response', (c) => {
     const deleted = db.prepare(
         'DELETE FROM messages WHERE session_id = ? AND created_at > ?'
     ).run(message.session_id, message.created_at);
+
+    // 失效缓存
+    messageCache.invalidate(message.session_id);
 
     console.log(`[Message] Deleted ${deleted.changes} messages after ${messageId}`);
 

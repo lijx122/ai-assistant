@@ -30,6 +30,7 @@ interface Task {
     status: 'active' | 'paused' | 'completed';
     notify_target: string | null; // JSON string of NotifyTarget
     notify_enabled: number;
+    notify_on_success: number; // 成功时是否通知（0=不通知，1=通知）
     alert_on_error: number; // 0 = false, 1 = true
     last_run: number | null;
     next_run: number | null;
@@ -226,7 +227,8 @@ async function executeTask(task: Task): Promise<void> {
     }
 
     // 发送通知（动态分发到所有已注册且支持通知的渠道）
-    if ((task as any).notify_enabled !== undefined && (task as any).notify_enabled !== 0) {
+    // 失败必通知；成功由 notify_on_success 控制（notify_enabled=1 且 notify_on_success=1 时通知）
+    if (task.notify_enabled !== 0 && (status !== 'success' || task.notify_on_success === 1)) {
         const duration = endedAt - startedAt;
         sendTaskNotification({
             task,

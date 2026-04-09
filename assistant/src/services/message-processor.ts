@@ -86,7 +86,7 @@ export async function buildSystemPrompt(
 ## 可用工具
 
 以下工具按类别列出，遇到不熟悉的工具或需要了解详细用法时，
-调用 read_skill({"name":"tools/<类别>"}) 获取完整说明。
+调用 read_skill("tools-<类别>") 获取完整说明。
 
 文件操作：read_file · write_file · file_delete · file_move
 搜索研究：web_search · web_fetch · deep_research
@@ -191,6 +191,26 @@ deep_research 工具支持三种模式：
 
 重要：deep_research 工具会执行真实的搜索、代码分析或项目分析，请信任并基于返回的数据生成报告。`);
     }
+
+    // 9. 任务追踪规范（渠道消息自动追踪）
+    systemPromptParts.push(`
+---
+## 任务追踪规范（渠道消息必读）
+
+当收到需要多步骤完成的任务类消息（如"帮我搜索 xxx 并整理成报告"、
+"查一下 xxx"、"分析一下 xxx"等）时，必须按以下流程操作：
+
+1. **处理前**：调用 todo_read 查看现有任务
+2. **创建任务**：如果需要执行多个步骤，用 todo_write 创建任务列表，
+   将相关项标记为 done: false（注意：是布尔值 false，不是字符串）
+3. **执行任务**：按步骤执行，完成一步更新一步（仍为 done: false）
+4. **处理完成后**：必须再次调用 todo_write，将相关任务项标记为 done: true
+5. **失败处理**：如果任务无法完成，调用 todo_write 将该项标记为 done: true，
+   并在内容中说明失败原因
+
+重要：不要忘记最后的 done: true 标记，这是自动化任务追踪的关键。
+只有在本次会话中创建或更新的 todo 项才需要标记，查询类任务无需创建 todo。
+---`);
 
     return systemPromptParts.join('\n');
 }

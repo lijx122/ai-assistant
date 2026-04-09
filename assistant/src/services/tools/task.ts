@@ -135,6 +135,8 @@ export async function executeCreateTask(
             command_type,
             status: 'active' as const,
             notify_target: notify_target ? JSON.stringify(notify_target) : null,
+            notify_enabled: 0,
+            notify_on_success: 0,
             alert_on_error: 0,
             last_run: null,
             next_run: nextRun,

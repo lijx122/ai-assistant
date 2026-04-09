@@ -290,6 +290,11 @@
                 class="w-3.5 h-3.5 rounded border-slate-300 text-oxygen-blue"/>
               <span class="text-xs text-slate-600">微信</span>
             </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" v-model="form.notify_no_success"
+                class="w-3.5 h-3.5 rounded border-slate-300 text-oxygen-blue"/>
+              <span class="text-xs text-slate-500">成功后不通知</span>
+            </label>
           </div>
         </div>
 
@@ -343,6 +348,7 @@ const form = ref({
   command: '',
   alert_on_error: false,
   notify_enabled: false,    // 通知总开关
+  notify_no_success: false, // 成功时不通知（默认成功也通知）
   notify_channels: [],      // ['web', 'lark', 'weixin']
 })
 
@@ -469,6 +475,7 @@ function openModal(task = null) {
       command: task.command,
       alert_on_error: !!task.alert_on_error,
       notify_enabled: !!(channels.length || task.notify_enabled),
+      notify_no_success: task.notify_on_success === 0,
       notify_channels: channels,
     }
   } else {
@@ -476,7 +483,7 @@ function openModal(task = null) {
       name: '', schedule_type: 'cron',
       command_type: 'shell', schedule: '',
       command: '', alert_on_error: false,
-      notify_enabled: false, notify_channels: [],
+      notify_enabled: false, notify_no_success: false, notify_channels: [],
     }
   }
   showModal.value = true
@@ -506,6 +513,7 @@ async function saveTask() {
       command: form.value.command,
       alertOnError: form.value.alert_on_error,
       notifyEnabled: form.value.notify_enabled,
+      notifyOnSuccess: form.value.notify_no_success ? 0 : 1,
       notifyTarget,
     }
     if (editingTask.value) {
