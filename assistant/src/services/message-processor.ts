@@ -76,11 +76,27 @@ export async function buildSystemPrompt(
 - 用户的约束条件（时间/资源/能力）是真实存在的，方案要在约束内
 `);
 
-    // 1. Recall 历史记录搜索提示 + 记忆工具提示
+    // 1. 可用工具索引表
     systemPromptParts.push(`
----工具使用提示---
-如果用户提到之前的对话内容（如"之前说的"、"上次讨论的"），使用 recall 工具搜索历史记录。
-如需了解项目背景或用户偏好，使用 read_workspace_memory 和 read_impression 工具。`);
+## 可用工具
+
+以下工具按类别列出，遇到不熟悉的工具或需要了解详细用法时，
+调用 read_skill({"name":"tools/<类别>"}) 获取完整说明。
+
+文件操作：read_file · write_file · file_delete · file_move
+搜索研究：web_search · web_fetch · deep_research
+记忆系统：recall · read_workspace_memory · read_impression
+笔记管理：note_write · note_read · note_search
+任务自动化：create_task · reminder_set
+代码执行：bash · code_search · code_analyze · claude_code
+Git：git_history · git_revert
+渠道通知：（内部工具，无需调用）
+
+工具选择原则：
+- 优先选最轻量的工具（code_search 优于 claude_code）
+- 只读操作不触发 HITL，写操作谨慎
+- 不确定工具用法时先 read_skill 再使用
+`);
 
     // 2. 工作区配置（IDENTITY.md + USER.md + TOOLS.md）
     if (workspaceConfigPrompt) {

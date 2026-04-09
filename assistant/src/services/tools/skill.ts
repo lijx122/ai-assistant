@@ -11,23 +11,41 @@ import type { ToolDefinition, ToolContext, ToolResult } from './types';
 /**
  * 获取技能文件路径
  * 优先查找工作区 skills，不存在则查 scripts/skills，然后查 src/skills
+ *
+ * 支持子目录路径格式，例如：
+ * - "git"         → skills/git.md
+ * - "tools/code"  → skills/tools/code.md
  */
 export function getSkillFilePath(workspaceId: string, skillName: string): string | null {
+    // 去除 .md 后缀，统一处理
     const normalizedName = skillName.endsWith('.md') ? skillName.slice(0, -3) : skillName;
     const { workspaceDirs, globalDirs } = getSkillScanDirs(workspaceId);
 
+    // 路径片段：支持 "tools/code" 这种带 / 的格式
+    const pathParts = normalizedName.split('/');
+
     // workspace 目录优先（覆盖全局）
     for (const dir of workspaceDirs) {
-        const filePath = resolve(dir, `${normalizedName}.md`);
+        // 优先查找：dir/tools/code.md → dir/tools/code.md
+        const filePath = resolve(dir, ...pathParts) + '.md';
         if (existsSync(filePath)) {
             return filePath;
+        }
+        // 备选：dir/tools/code/SKILL.md
+        const altPath = resolve(dir, ...pathParts, 'SKILL.md');
+        if (existsSync(altPath)) {
+            return altPath;
         }
     }
 
     for (const dir of globalDirs) {
-        const filePath = resolve(dir, `${normalizedName}.md`);
+        const filePath = resolve(dir, ...pathParts) + '.md';
         if (existsSync(filePath)) {
             return filePath;
+        }
+        const altPath = resolve(dir, ...pathParts, 'SKILL.md');
+        if (existsSync(altPath)) {
+            return altPath;
         }
     }
 
