@@ -21,6 +21,7 @@ interface Task {
     command_type: 'shell' | 'assistant' | 'http';
     status: 'active' | 'paused' | 'completed';
     notify_target: string | null;
+    notify_enabled: number;
     alert_on_error: number;
     last_run: number | null;
     next_run: number | null;
@@ -60,7 +61,7 @@ taskRouter.get('/', (c) => {
 
     const tasks = db.prepare(
         `SELECT id, workspace_id, name, type, schedule, command, command_type,
-                status, notify_target, alert_on_error, last_run, next_run, run_count, fail_count, created_at
+                status, notify_target, notify_enabled, alert_on_error, last_run, next_run, run_count, fail_count, created_at
          FROM tasks WHERE workspace_id = ? ORDER BY created_at DESC`
     ).all(workspaceId) as Task[];
 
@@ -151,12 +152,13 @@ taskRouter.post('/', async (c) => {
 
     // notify_target 序列化
     const notifyTarget = body.notifyTarget ? JSON.stringify(body.notifyTarget) : null;
+    const notifyEnabled = body.notifyEnabled ? 1 : 0;
     const alertOnError = body.alertOnError ? 1 : 0;
 
     db.prepare(
         `INSERT INTO tasks (id, workspace_id, user_id, name, type, schedule, command, command_type,
-                           status, notify_target, alert_on_error, last_run, next_run, run_count, fail_count, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, NULL, ?, 0, 0, ?)`
+                           status, notify_target, notify_enabled, alert_on_error, last_run, next_run, run_count, fail_count, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, NULL, ?, 0, 0, ?)`
     ).run(
         id,
         body.workspaceId,
@@ -167,6 +169,7 @@ taskRouter.post('/', async (c) => {
         body.command,
         body.commandType,
         notifyTarget,
+        notifyEnabled,
         alertOnError,
         nextRun,
         now
@@ -184,6 +187,7 @@ taskRouter.post('/', async (c) => {
         command_type: body.commandType,
         status: 'active',
         notify_target: notifyTarget,
+        notify_enabled: notifyEnabled,
         alert_on_error: alertOnError,
         last_run: null,
         next_run: nextRun,
@@ -256,6 +260,11 @@ taskRouter.put('/:id', async (c) => {
     if (body.notifyTarget !== undefined) {
         updates.push('notify_target = ?');
         values.push(body.notifyTarget ? JSON.stringify(body.notifyTarget) : null);
+    }
+
+    if (body.notifyEnabled !== undefined) {
+        updates.push('notify_enabled = ?');
+        values.push(body.notifyEnabled ? 1 : 0);
     }
 
     if (body.alertOnError !== undefined) {

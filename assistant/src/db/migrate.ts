@@ -349,6 +349,13 @@ const migrations: Migration[] = [
             ALTER TABLE weixin_accounts ADD COLUMN last_sender_id TEXT;
         `,
     },
+    {
+        version: 23,
+        name: 'add_notify_enabled_to_tasks',
+        sql: `
+            ALTER TABLE tasks ADD COLUMN notify_enabled INTEGER DEFAULT 0;
+        `,
+    },
 ];
 
 /**

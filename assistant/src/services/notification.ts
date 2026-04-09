@@ -18,6 +18,9 @@ interface TaskSnapshot {
     workspace_id: string;
     name: string;
     command_type: string;
+    notify_enabled: number;
+    /** JSON string of { channels?: string[] } */
+    notify_target: string | null;
 }
 
 /**
@@ -56,7 +59,7 @@ export function formatTaskNotification(
  * 发送任务通知到所有支持通知的渠道
  */
 export async function sendTaskNotification(params: {
-    task: Pick<TaskSnapshot, 'id' | 'workspace_id' | 'name' | 'command_type'>;
+    task: Pick<TaskSnapshot, 'id' | 'workspace_id' | 'name' | 'command_type' | 'notify_enabled' | 'notify_target'>;
     status: 'success' | 'error' | 'timeout';
     output: string | null;
     error: string | null;
@@ -64,18 +67,35 @@ export async function sendTaskNotification(params: {
 }): Promise<void> {
     const { task, status, output, error, durationMs } = params;
 
-    const { message, level } = formatTaskNotification(task, status, output, error, durationMs);
-    const channels = channelManager.getNotifiableChannels();
+    // 解析勾选的渠道列表（兼容旧格式：notify_target.type）
+    let notifyChannels: string[] = [];
+    try {
+        if (task.notify_target) {
+            const parsed = JSON.parse(task.notify_target);
+            if (Array.isArray(parsed.channels)) {
+                notifyChannels = parsed.channels;
+            } else if (parsed.type) {
+                // 旧格式兼容
+                notifyChannels = [parsed.type];
+            }
+        }
+    } catch {
+        // 解析失败，忽略
+    }
 
-    if (channels.length === 0) {
-        console.debug('[Notification] No notifiable channels available');
+    const allChannels = channelManager.getNotifiableChannels();
+    const targetChannels = allChannels.filter(ch => notifyChannels.includes(ch.name));
+
+    if (targetChannels.length === 0) {
+        console.debug('[Notification] No matching notify channels for task', task.id);
         return;
     }
 
-    console.log(`[Notification] Sending ${status} notification for task "${task.name}" to ${channels.length} channel(s)`);
+    const { message, level } = formatTaskNotification(task, status, output, error, durationMs);
+    console.log(`[Notification] Sending ${status} notification for task "${task.name}" to ${targetChannels.length} channel(s): ${notifyChannels.join(',')}`);
 
     const results = await Promise.allSettled(
-        channels.map(channel =>
+        targetChannels.map(channel =>
             channel.sendNotification(message, level)
                 .then(ok => ({ channel: channel.name, ok }))
         )
@@ -97,7 +117,8 @@ export async function sendTaskNotification(params: {
     logger.system.info('notification', `Task notification sent: ${task.name} [${status}]`, {
         taskId: task.id,
         workspaceId: task.workspace_id,
-        channelCount: channels.length,
+        channelCount: targetChannels.length,
+        channels: notifyChannels,
         level,
     });
 }

@@ -268,23 +268,29 @@
 
         <!-- 完成后通知 -->
         <div>
-          <p class="text-[10px] font-mono opacity-40 mb-1.5">完成后通知</p>
-          <select v-model="form.notify"
-            class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100
-                   text-sm outline-none focus:border-oxygen-blue/40 transition-colors">
-            <option value="">不通知</option>
-            <option value="web">Web 仪表盘</option>
-            <option value="lark">飞书</option>
-          </select>
-        </div>
-
-        <!-- 飞书 Chat ID（仅飞书时显示） -->
-        <div v-if="form.notify === 'lark'">
-          <p class="text-[10px] font-mono opacity-40 mb-1.5">飞书 Chat ID</p>
-          <input v-model="form.notify_chat_id" type="text"
-            class="w-full bg-white px-4 py-2.5 rounded-2xl border border-slate-100
-                   text-sm font-mono outline-none focus:border-oxygen-blue/40 transition-colors"
-            placeholder="oc_xxx..."/>
+          <div class="flex items-center gap-2 mb-2">
+            <input type="checkbox" v-model="form.notify_enabled"
+              class="w-4 h-4 rounded border-slate-300 text-oxygen-blue"/>
+            <label class="text-xs font-medium text-slate-700">完成后通知</label>
+          </div>
+          <div v-if="form.notify_enabled"
+            class="pl-6 space-y-1.5">
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" value="web" v-model="form.notify_channels"
+                class="w-3.5 h-3.5 rounded border-slate-300 text-oxygen-blue"/>
+              <span class="text-xs text-slate-600">Web 仪表盘</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" value="lark" v-model="form.notify_channels"
+                class="w-3.5 h-3.5 rounded border-slate-300 text-oxygen-blue"/>
+              <span class="text-xs text-slate-600">飞书</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" value="weixin" v-model="form.notify_channels"
+                class="w-3.5 h-3.5 rounded border-slate-300 text-oxygen-blue"/>
+              <span class="text-xs text-slate-600">微信</span>
+            </label>
+          </div>
         </div>
 
         <!-- 错误提示 -->
@@ -336,8 +342,8 @@ const form = ref({
   schedule: '',
   command: '',
   alert_on_error: false,
-  notify: '',           // '' = 不通知, 'web' = Web仪表盘, 'lark' = 飞书
-  notify_chat_id: '',
+  notify_enabled: false,    // 通知总开关
+  notify_channels: [],      // ['web', 'lark', 'weixin']
 })
 
 // ── 工具函数 ──
@@ -450,29 +456,27 @@ function openModal(task = null) {
   editingTask.value = task
   modalErr.value = ''
   if (task) {
-    // Parse notify_target from backend
-    let notify = ''
-    let notify_chat_id = ''
-    if (task.notify_target) {
-      notify = task.notify_target.type || ''
-      notify_chat_id = task.notify_target.chatId || ''
-    }
+    // 兼容旧格式：task.notify_target → 新格式
+    const channels = []
+    if (task.notify_target?.type === 'web' || task.notify_target?.channels?.includes('web')) channels.push('web')
+    if (task.notify_target?.type === 'lark' || task.notify_target?.channels?.includes('lark')) channels.push('lark')
+    if (task.notify_target?.channels?.includes('weixin')) channels.push('weixin')
     form.value = {
       name: task.name,
-      schedule_type: task.type,  // backend uses 'type'
+      schedule_type: task.type,
       command_type: task.command_type,
       schedule: task.schedule,
       command: task.command,
       alert_on_error: !!task.alert_on_error,
-      notify,
-      notify_chat_id,
+      notify_enabled: !!(channels.length || task.notify_enabled),
+      notify_channels: channels,
     }
   } else {
     form.value = {
       name: '', schedule_type: 'cron',
       command_type: 'shell', schedule: '',
       command: '', alert_on_error: false,
-      notify: '', notify_chat_id: '',
+      notify_enabled: false, notify_channels: [],
     }
   }
   showModal.value = true
@@ -484,24 +488,25 @@ async function saveTask() {
     modalErr.value = '请填写所有必填项'
     return
   }
+  if (form.value.notify_enabled && form.value.notify_channels.length === 0) {
+    modalErr.value = '请至少选择一个通知渠道'
+    return
+  }
   try {
-    // Build notifyTarget for backend
-    let notifyTarget = null
-    if (form.value.notify === 'web') {
-      notifyTarget = { type: 'web' }
-    } else if (form.value.notify === 'lark' && form.value.notify_chat_id) {
-      notifyTarget = { type: 'lark', chatId: form.value.notify_chat_id }
-    }
-    // Map frontend field names to backend API field names
+    // 兼容旧后端：仍发送 notifyTarget（空对象表示不使用）
+    const notifyTarget = form.value.notify_enabled
+      ? { channels: form.value.notify_channels }
+      : null
     const payload = {
       workspaceId: store.currentWorkspace.id,
       name: form.value.name,
-      type: form.value.schedule_type,           // backend uses 'type'
-      commandType: form.value.command_type,     // backend uses camelCase
+      type: form.value.schedule_type,
+      commandType: form.value.command_type,
       schedule: form.value.schedule,
       command: form.value.command,
-      alertOnError: form.value.alert_on_error,  // backend uses camelCase
-      notifyTarget,                              // backend expects object or null
+      alertOnError: form.value.alert_on_error,
+      notifyEnabled: form.value.notify_enabled,
+      notifyTarget,
     }
     if (editingTask.value) {
       await api.put(`/api/tasks/${editingTask.value.id}`, payload)

@@ -29,6 +29,7 @@ interface Task {
     command_type: 'shell' | 'assistant' | 'http';
     status: 'active' | 'paused' | 'completed';
     notify_target: string | null; // JSON string of NotifyTarget
+    notify_enabled: number;
     alert_on_error: number; // 0 = false, 1 = true
     last_run: number | null;
     next_run: number | null;
@@ -225,16 +226,18 @@ async function executeTask(task: Task): Promise<void> {
     }
 
     // 发送通知（动态分发到所有已注册且支持通知的渠道）
-    const duration = endedAt - startedAt;
-    sendTaskNotification({
-        task,
-        status,
-        output,
-        error,
-        durationMs: duration,
-    }).catch((notifyErr: any) => {
-        console.error(`[Cron] Failed to send notification for task ${task.id}:`, notifyErr.message);
-    });
+    if ((task as any).notify_enabled !== undefined && (task as any).notify_enabled !== 0) {
+        const duration = endedAt - startedAt;
+        sendTaskNotification({
+            task,
+            status,
+            output,
+            error,
+            durationMs: duration,
+        }).catch((notifyErr: any) => {
+            console.error(`[Cron] Failed to send notification for task ${task.id}:`, notifyErr.message);
+        });
+    }
 
     // Shell 任务失败且 alert_on_error=true 时，创建告警
     if (task.command_type === 'shell' && status === 'error' && task.alert_on_error) {
