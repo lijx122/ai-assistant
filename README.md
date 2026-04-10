@@ -57,10 +57,11 @@
 └────────────────────────────────────────────────────────┘
          │
          │  历史检索
-┌────────▼────────┐  ┌──────────────────────────────────┐
-│  Recall (FTS5)  │  │  Embedder (本地 bge-small-zh)   │
-│  关键词全文搜索   │  │  Float32 384维，cosine 相似度   │
-└────────┬────────┘  └──────────────┬───────────────────┘
+┌────────▼──────────────────────────────┐  ┌──────────────────────────────────┐
+│  Recall 向量引擎（滑动窗口 + cosine） │  │  Embedder（bge-small-zh-v1.5） │
+│  → message_embeddings 表（BLOB）      │  │  384维 Float32，INT8 量化       │
+│  → 降级：LIKE 关键词搜索               │  │  按需加载，30min 空闲卸载        │
+└────────┬──────────────────────────────┘  └──────────────┬───────────────────┘
          │                           │
 ┌────────▼───────────────────────────▼───────────────────┐
 │                   SQLite (better-sqlite3)               │
@@ -79,8 +80,8 @@
 
 - **多工作区隔离**：每个项目独立上下文，切换互不影响
 - **对话压缩（Compact）**：上下文超过 60k tokens 时自动压缩，保留最近 4 轮 + 摘要历史
-- **FTS5 全文搜索**：关键词搜索历史对话，无需向量检索即可快速回溯
-- **本地 Embedding**：使用 `bge-small-zh-v1.5` 在本地生成向量，cosine 相似度检索，30min 空闲自动卸载模型
+- **向量语义检索**：滑动窗口（3条消息合并）生成 384 维向量，cosine 相似度 + 30天时间衰减加权，高相关结果优先；低于阈值自动降级到关键词搜索
+- **本地 Embedding**：使用 `bge-small-zh-v1.5` 在本地生成向量，Transformers.js，CPU 可运行，30min 空闲自动卸载模型
 - **工作区记忆**：AI 自动维护 IDENTITY.md / USER.md，支持自定义 TOOLS.md
 
 ### 工具系统（18+ 工具）
@@ -162,39 +163,58 @@ AgentRunner 暂停执行，发送 'confirmation_requested' 事件给前端
 
 ### 3. 向量检索怎么实现（无外部依赖）
 
-很多项目引入 Pinecone / Qdrant / Milvus 来做向量检索，但个人项目这样做的代价是：额外的服务进程、API key 管理、网络延迟。本项目用**两层检索策略**完全本地化：
+很多项目引入 Pinecone / Qdrant / Milvus 做向量检索，但代价是额外的服务进程、API key、网络延迟。本项目**以向量检索为主**（用 SQLite BLOB 存向量），完全零外部依赖：
 
-**第一层：FTS5 全文检索（SQLite 内置）**
+**向量存储：`message_embeddings` 表**
 
 ```sql
--- messages_fts 是 messages 表的 FTS5 虚拟表
-INSERT INTO messages_fts(content, message_id, session_id, workspace_id, role, created_at)
-VALUES (?, ?, ?, ?, ?, ?);
-
--- 搜索：多词 AND 查询
-SELECT mf.content, mf.role, mf.created_at
-FROM messages_fts mf
-WHERE messages_fts MATCH '考试 AND 地区' AND mf.workspace_id = ? AND mf.role = 'user'
-ORDER BY rank LIMIT 2;
+CREATE TABLE message_embeddings (
+  message_id    TEXT PRIMARY KEY,  -- 锚点消息
+  workspace_id  TEXT NOT NULL,
+  session_id   TEXT NOT NULL,
+  embedding    BLOB NOT NULL,      -- Float32Array 序列化为 BLOB（384维 × 4字节 = 1536B）
+  window_text  TEXT,                -- 窗口合并后的原始文本（用于结果展示）
+  window_size  INTEGER,             -- 窗口内消息数量（默认 3）
+  created_at   INTEGER
+);
 ```
 
-优势：SQLite 原生支持、无额外依赖、中英文分词由 FTS5 内置处理、ms 级响应。
+**滑动窗口策略**：不是给单条消息建向量，而是把相邻 3 条 user 消息合并成一个窗口，解决零散对话语义不完整的问题：
 
-**第二层：向量相似度（Transformers.js 本地模型）**
+```
+会话：[msg1] [msg2] [msg3] [msg4] [msg5] [msg6]
+窗口1：  [msg1 msg2 msg3]  → 向量A（锚点=msg1）
+窗口2：     [msg2 msg3 msg4] → 向量B（锚点=msg2）
+窗口3：        [msg3 msg4 msg5] → 向量C（锚点=msg3）
+```
 
 ```typescript
-// bge-small-zh-v1.5：384维向量，量化版 < 80MB
-const extractor = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {
-    quantized: true,  // INT8 量化，减少内存占用
-});
-const vector = await ext(text, { pooling: 'mean', normalize: true });
-// cosineSimilarity(a, b) 手工实现，无外部依赖
+// 窗口合并：相邻 3 条 user 消息合并后再 embedding
+const windowText = messages
+  .slice(i - halfWindow, i + halfWindow + 1)
+  .map(m => extractText(m.content))
+  .join('\n');
+
+const vec = await embed(windowText); // bge-small-zh-v1.5，384维，INT8 量化
 ```
 
-设计决策：
-- **按需加载**：对话时才加载模型，不占用启动时间
-- **30min 空闲卸载**：自动释放内存，适合个人开发机
-- **快速失败降级**：如果模型正在下载/加载中，Recall 降级到 FTS5，不阻塞对话
+**搜索：cosine 相似度 + 时间衰减**
+
+```typescript
+// 语义相似度 × (0.7 + 0.3 × 时间衰减)
+// 时间衰减：30 天半衰期，越新的对话权重越高
+const timeDecay = Math.exp(-days / 30);
+const finalScore = semantic * (0.7 + 0.3 * timeDecay);
+
+// 低于 0.45 阈值才降级到 LIKE 关键词搜索
+const scored = rows
+  .filter(r => r.score > 0.45)
+  .sort((a, b) => b.score - a.score);
+```
+
+**降级策略**：embedding 模型加载中或没有向量结果时，降级到 LIKE 关键词搜索（基于 `window_text` 字段）。FTS5 全文检索只用于飞书/微信渠道的命令 `/recall`。
+
+**本地 Embedding 模型**：`bge-small-zh-v1.5`（384 维，INT8 量化 < 80MB），Transformers.js WebAssembly 后端，CPU 可运行，30min 空闲自动卸载。
 
 ### 4. Context Compact 策略
 
