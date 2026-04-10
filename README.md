@@ -1,134 +1,262 @@
-# AI Assistant - Personal Agent Runtime
+# ClaudeOS — Personal AI Assistant Runtime
 
-一个面向个人开发者的 **AI Agent 运行时系统**，支持：
+**一个本地运行的个人 AI 助手，基于 Claude API，支持飞书/微信消息接入、文件操作、终端控制、Git 版本控制、任务自动化。**
 
-- 多工作区上下文记忆
-- 工具调用（文件 / 终端 / 网络 / 任务调度）
-- 自动化运维（任务失败分析 + 自修复）
-- Web / 飞书 多渠道统一接入
+> 不同于 ChatGPT 的单次对话，它是一个「会记忆、能操作、可长期运行」的个人 AI 工作台。
 
-> ⚠️ 当前仅支持 Anthropic Claude API
-
----
-
-## ✨ 新增功能（v2026-03+）
-
-### 对话增强
-- **消息编辑重发**：用户消息发出后可编辑，重新生成 AI 回复
-- **对话分支**：从任意消息创建分支，对话可多线发展
-- **会话导出**：一键将会话导出为 Markdown / JSON 格式
-
-### 终端增强
-- **Ctrl+F 搜索**：Web 终端内置搜索功能，支持关键词高亮跳转
-
-### 工程能力
-- **Git 历史面板**：AI 写文件后自动 commit，支持历史查看与回滚
-- **Monaco Diff 视图**：文件修改可逐块接受/拒绝
-
-### 响应式布局
-- **多端适配**：桌面 / 平板 / 手机三断点自动切换
+[![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](https://opensource.org/licenses/ISC)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-blue.svg)](https://www.typescriptlang.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-green.svg)](https://nodejs.org/)
 
 ---
 
-## ✨ What makes this different?
+## 技术架构
 
-它更像一个：
+```
+┌─────────────────────────────────────────────────────────┐
+│                      用户界面                            │
+│   Web UI (Vue3)   │   飞书机器人   │   微信渠道            │
+└────────┬──────────┴───────┬───────┴──────────┬──────────┘
+         │                  │                   │
+         │  WebSocket       │  Lark API         │  iLink API
+         └──────────────────┼───────────────────┘
+                            │
+                    ┌────────▼────────┐
+                    │  ChannelManager  │  ← 统一消息入口
+                    │  (base.ts)       │
+                    └────────┬────────┘
+                             │
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+┌────────▼────────┐  ┌───────▼──────┐  ┌────────▼────────┐
+│  指令解析        │  │  消息处理器   │  │  确认状态管理    │
+│  /ws /recall 等 │  │  message-    │  │  confirmation   │
+│                 │  │  processor   │  │  -state.ts      │
+└─────────────────┘  └───────┬──────┘  └─────────────────┘
+                             │  执行工具 / 构建 System Prompt
+         ┌───────────────────┼───────────────────┐
+         │                   │                   │
+┌────────▼────────┐  ┌───────▼──────┐  ┌────────▼────────┐
+│  AgentRunner    │  │  System      │  │  WorkspaceLock  │
+│  多轮对话循环    │  │  Prompt 构建 │  │  (并发控制)      │
+│  run() → 工具 → │  │  思维方法论  │  │                  │
+│  run() → ...    │  │  工具索引    │  └─────────────────┘
+└────────┬────────┘  └──────────────┘
+         │
+         │  getToolDefinitions()  ←── 18+ 工具注册
+         │
+┌────────▼──────────────────────────────────────────────┐
+│                     Tool Registry                       │
+│  bash │ file │ todo │ recall │ web_search │ deep_     │
+│  research │ git │ claude_code │ note │ skill │ ...    │
+│                                                        │
+│  ┌────────────┐  ┌─────────────┐  ┌────────────────┐ │
+│  │ danger-    │  │ HITL        │  │ timeout /      │ │
+│  │ detector   │  │ confirmFlow │  │ error handling │ │
+│  └────────────┘  └─────────────┘  └────────────────┘ │
+└────────────────────────────────────────────────────────┘
+         │
+         │  历史检索
+┌────────▼────────┐  ┌──────────────────────────────────┐
+│  Recall (FTS5)  │  │  Embedder (本地 bge-small-zh)   │
+│  关键词全文搜索   │  │  Float32 384维，cosine 相似度   │
+└────────┬────────┘  └──────────────┬───────────────────┘
+         │                           │
+┌────────▼───────────────────────────▼───────────────────┐
+│                   SQLite (better-sqlite3)               │
+│  workspaces │ sessions │ messages │ tasks │ notes │ │
+│  messages_fts │ embeddings │ cron_jobs              │
+└─────────────────────────────────────────────────────────┘
+```
 
-> 🧠 **“会记忆、能操作、可长期运行的个人 AI 工作台”**
+**数据流**：用户消息 → ChannelManager → MessageProcessor → AgentRunner（多轮 Tool Call）→ 工具执行 → 回复推送
 
 ---
 
-## 🧩 Core Capabilities
+## 核心功能
 
-- 🧠 **Workspace-aware memory**  
-  AI 能记住每个项目的上下文、技术选型和历史决策
+### 对话与记忆
 
-- 🛠 **Tool-driven execution**  
-  支持 Shell / 文件 / 网络 / 任务调度等 18+ 工具
+- **多工作区隔离**：每个项目独立上下文，切换互不影响
+- **对话压缩（Compact）**：上下文超过 60k tokens 时自动压缩，保留最近 4 轮 + 摘要历史
+- **FTS5 全文搜索**：关键词搜索历史对话，无需向量检索即可快速回溯
+- **本地 Embedding**：使用 `bge-small-zh-v1.5` 在本地生成向量，cosine 相似度检索，30min 空闲自动卸载模型
+- **工作区记忆**：AI 自动维护 IDENTITY.md / USER.md，支持自定义 TOOLS.md
 
-- 🔁 **Autonomous operations**  
-  定时任务失败 → AI 自动分析 → 提供修复方案
+### 工具系统（18+ 工具）
 
-- 🌐 **Multi-channel interface**  
-  Web UI + 飞书机器人共用同一套 Agent
+| 类别 | 工具 | 说明 |
+|------|------|------|
+| 文件 | `read_file` / `write_file` / `file_delete` / `file_move` | 带路径限制，危险操作需确认 |
+| 终端 | `bash` | 带危险命令检测（rm/sudo/dd 等） |
+| 搜索 | `web_search` / `web_fetch` / `deep_research` | 支持 Web/Codebase/GitHub 三种深度研究模式 |
+| 记忆 | `recall` / `read_workspace_memory` / `read_impression` | 全文搜索 + 向量检索 |
+| 笔记 | `note_write` / `note_read` / `note_search` | 结构化笔记管理 |
+| 任务 | `create_task` / `reminder_set` | Cron 定时任务 + 提醒 |
+| 代码 | `code_search` / `code_analyze` / `claude_code` | 代码库搜索 + Claude Code 调用 |
+| Git | `git_history` / `git_revert` | 工作区文件 commit / 回滚 |
+
+### 多渠道接入
+
+- **Web UI**：Vue3 响应式界面，包含对话、文件管理、Web Terminal（node-pty + xterm.js）、Monaco Diff、Git 历史面板
+- **飞书机器人**：多会话并行，消息可靠投递（delivery queue + 重试）
+- **微信渠道**：通过 iLink API 接入，与飞书/Web 共用同一 Agent 引擎
+
+### 工程化能力
+
+- **HITL 安全机制**：所有写操作（bash / file_delete / file_move 等）经 danger-detector 检测，高危命令弹窗确认后才执行，超时自动取消
+- **Git 版本控制**：AI 写文件自动 commit，支持历史查看与回滚
+- **优雅关闭**：SIGTERM 时安全断开 WebSocket、停止定时任务、卸载 embedding 模型
+- **JWT 鉴权**：基于 bcrypt 密码 hash 的登录认证，Cookie + Token 双模式
 
 ---
 
-## 核心特性
+## 工程亮点
 
-### 1. AI 对话与工具调用
-- **流式对话**：基于 WebSocket 的实时消息流
-- **工具系统**：Claude 可调用多种工具完成任务
-- **人机确认**：危险操作（删除文件、执行命令等）需人工确认
-- **上下文管理**：自动 compact 超长对话，保持上下文窗口健康
+### 1. 为什么不用 LangChain
 
-### 2. 内置工具集（Tools）
+LangChain 的核心价值在于**链式组合**（Chain = LLM + 提示词 + 工具 + 记忆的统一抽象）。但当你的应用只有一个 Agent、工具是固定集、不需要链式编排时，LangChain 的抽象反而是负担：
 
-| 工具 | 功能描述 |
-|------|----------|
-| `bash` | 执行 Shell 命令，支持超时和危险命令检测 |
-| `read_file` | 读取文件内容 |
-| `write_file` | 写入文件（覆盖/追加） |
-| `delete_file` | 删除文件（需确认） |
-| `move_file` | 移动/重命名文件（需确认） |
-| `todo_read` / `todo_write` | 读写工作区待办事项 |
-| `create_task` | 创建定时任务（Cron 表达式） |
-| `web_search` | 网页搜索（需配置 SearXNG） |
-| `web_fetch` | 抓取网页内容 |
-| `read_skill` | 读取 Skill 技能定义 |
-| `claude_code` | 调用 Claude Code CLI |
-| `recall` | 向量检索历史对话 |
-| `read_workspace_memory` | 读取工作区记忆 |
-| `read_impression` | 读取用户印象记忆 |
-| `note_write` / `note_read` / `note_search` | 笔记管理 |
+- **版本不稳定**：LangChain 0.x → 0.2 → 0.3 每次升级都是破坏性变更
+- **Bundle 过大**：import LangChain = 多 10MB，打包体积翻倍
+- **调试困难**：链式调用隐藏了实际的数据流，出问题只能靠 LangChain 文档
+- **定制受限**：tool_call 格式、HITL 流程、消息队列都是定制需求，LangChain 没有给足够的钩子
 
-### 3. Web 界面功能
-- **对话面板**：多工作区隔离，Markdown 渲染，支持消息编辑、分支、导出
-- **文件管理器**：树形浏览、编辑、上传下载
-- **终端**：多会话 Web Terminal（基于 node-pty + xterm.js），内置 Ctrl+F 搜索
-- **工程面板**：集成终端、Monaco 编辑器、Git 历史面板（commit/回滚）
-- **任务面板**：Cron 定时任务管理
-- **仪表盘**：系统状态、运行器状态、日志流
-- **记忆面板**：工作区记忆、用户印象管理
+本项目用 **~400 行 TypeScript** 实现了完整的 Agent 循环：多轮 `run()` → `runOnce()` → `sanitizeMessages()` → 工具分发 → 结果聚合。没有抽象泄漏，每个决策都可直接修改。
 
-### 4. 工程化特性
-- **工作区隔离**：多项目并行，数据互不影响
-- **JWT 认证**：基于 JWT 的登录鉴权
-- **飞书集成**：支持 Lark 机器人接入（可选）
-- **微信集成**：支持微信渠道接入（可选）
-- **自动归档**：定期归档历史消息
-- **向量化检索**：基于 Transformers.js 的本地 Embedding
-- **优雅关闭**：SIGTERM 时安全断开 WebSocket、停止定时任务
-- **Git 版本控制**：工作区文件变更自动 commit，支持回滚
-- **命令模块化**：多渠道（飞书/微信/Web）命令统一处理
+```typescript
+// 核心循环：极简，无依赖
+for (let round = 1; round <= maxRounds; round++) {
+    const result = await this.runOnce(messages, systemPrompt);
+    messages.push({ role: 'assistant', content: result.blocks });
+    const toolResults = await Promise.all(result.toolUses.map(handleToolCall));
+    messages.push({ role: 'user', content: toolResults }); // 下一轮输入
+}
+```
+
+### 2. HITL 机制怎么工作
+
+HITL（Human-in-the-Loop）不是简单地在工具执行前加一个 `confirm()`，而是一套完整的**异步确认状态机**：
+
+```
+Claude 请求执行 bash rm -rf /tmp/*
+       ↓
+danger-detector.ts 检测到高危命令
+       ↓
+executeTool() 返回 { requiresConfirmation: true, confirmationId: "xxx" }
+       ↓
+AgentRunner 暂停执行，发送 'confirmation_requested' 事件给前端
+       ↓
+前端弹窗：⚠️ 高危操作确认 — rm -rf /tmp/*
+用户点击「确认」→ POST /api/chat/confirm → executeConfirmedTool("xxx")
+       ↓
+工具真正执行，结果发回 Claude，Agent 继续
+```
+
+关键设计：
+
+- **Promise 暂停**：工具执行函数返回后，AgentRunner 等待 `PendingConfirmation.resolve()`，Claude 不会收到错误消息
+- **超时机制**：默认 5 分钟超时，超时自动取消，防止弹窗堆积
+- **渠道无关**：确认机制由 `Channel.requestConfirmation()` 统一抽象，飞书/微信可以用按钮或文本回复确认
+- **危险模式库**：`danger-detector.ts` 包含 12 种危险命令模式（rm / dd / mkfs / sudo / pipe_remote_script 等），正则驱动，可配置扩展
+
+### 3. 向量检索怎么实现（无外部依赖）
+
+很多项目引入 Pinecone / Qdrant / Milvus 来做向量检索，但个人项目这样做的代价是：额外的服务进程、API key 管理、网络延迟。本项目用**两层检索策略**完全本地化：
+
+**第一层：FTS5 全文检索（SQLite 内置）**
+
+```sql
+-- messages_fts 是 messages 表的 FTS5 虚拟表
+INSERT INTO messages_fts(content, message_id, session_id, workspace_id, role, created_at)
+VALUES (?, ?, ?, ?, ?, ?);
+
+-- 搜索：多词 AND 查询
+SELECT mf.content, mf.role, mf.created_at
+FROM messages_fts mf
+WHERE messages_fts MATCH '考试 AND 地区' AND mf.workspace_id = ? AND mf.role = 'user'
+ORDER BY rank LIMIT 2;
+```
+
+优势：SQLite 原生支持、无额外依赖、中英文分词由 FTS5 内置处理、ms 级响应。
+
+**第二层：向量相似度（Transformers.js 本地模型）**
+
+```typescript
+// bge-small-zh-v1.5：384维向量，量化版 < 80MB
+const extractor = await pipeline('feature-extraction', 'Xenova/bge-small-zh-v1.5', {
+    quantized: true,  // INT8 量化，减少内存占用
+});
+const vector = await ext(text, { pooling: 'mean', normalize: true });
+// cosineSimilarity(a, b) 手工实现，无外部依赖
+```
+
+设计决策：
+- **按需加载**：对话时才加载模型，不占用启动时间
+- **30min 空闲卸载**：自动释放内存，适合个人开发机
+- **快速失败降级**：如果模型正在下载/加载中，Recall 降级到 FTS5，不阻塞对话
+
+### 4. Context Compact 策略
+
+Claude Opus 的上下文窗口是 200k tokens，看起来很大，但多轮对话 + 文件操作结果会快速耗尽。本项目的压缩策略：
+
+```
+原始消息列表（可能 80k tokens）
+       ↓
+1. 分离 System Prompt（不压缩）
+2. 从后往前数最近 4 轮完整对话（保留）
+3. 中间消息：
+   - tool_result → 替换为 "[Compressed: Tool xxx execution completed]"
+   - assistant（纯文本）→ 截断至 150 字
+   - user → 截断至 100 字
+4. 重组：[System] + [压缩历史] + [最近4轮]
+       ↓
+压缩后（~40k tokens）
+通知前端：Context compacted: 80200 → 41200 tokens (-48.6%), 23 messages compressed
+```
+
+### 5. 多渠道统一架构
+
+```
+           ┌──────────────────┐
+           │  ChannelManager  │  ← 唯一的消息入口
+           │  broadcast()     │
+           │  alert()        │
+           └────┬─────────┬───┘
+      WebSocket │         │ Lark SDK
+               │         │
+    ┌──────────▼──┐   ┌──▼──────────┐
+    │ ws channel  │   │ lark channel │
+    │              │   │              │
+    │ sendMessage │   │ sendMessage  │
+    │ waitReply() │   │ waitReply()  │
+    └─────────────┘   └─────────────┘
+               Weixin via iLink API
+```
+
+核心设计原则：**所有渠道共用同一 AgentRunner，同一工具集，同一 SQLite 数据库**。新增渠道只需要实现 `Channel` 抽象类（6 个方法），不需要修改任何业务逻辑。
 
 ---
 
 ## 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 前端 | Vue 3 + Vite + Tailwind CSS + Monaco Editor + Xterm.js |
-| 后端 | Node.js + TypeScript + Hono |
-| 数据库 | SQLite (better-sqlite3) |
-| AI | Anthropic Claude API (@anthropic-ai/sdk) |
-| 终端 | node-pty |
-| 向量 | @xenova/transformers |
-
----
-
-## 目录与依赖规范
-
-1. 根目录（项目整体目录）统一维护仓库级文档与规则：`README.md`、`.gitignore`。
-2. `assistant/` 是主项目子目录，后端与前端依赖统一在 `assistant/package.json` 管理。
-3. `assistant/web-vue/` 仅存放 Vue 源码与 Vite 配置，不再维护独立的 `package.json` / `package-lock.json`。
-4. 用户本地编程目录（如 `.claude`、`.vscode`）属于个人环境文件，统一忽略，不提交到 Git。
+| 层级 | 技术选型 | 选型理由 |
+|------|---------|---------|
+| 前端框架 | Vue 3 + Vite + Tailwind CSS | 响应式组件，Tailwind 4 按需编译 |
+| 编辑器 | Monaco Editor | VS Code 同款，代码高亮 / Diff 视图 |
+| 终端 | node-pty + xterm.js | 真正的 PTY，支持 Bash / Zsh / Fish |
+| 后端框架 | Hono | 轻量（~14kB），原生支持 WebSocket + 中间件 |
+| 数据库 | SQLite（better-sqlite3）| 单文件、零配置、事务完整，FTS5 内置全文搜索 |
+| AI SDK | @anthropic-ai/sdk | 官方 SDK，流式响应，TypeScript 完整类型 |
+| 向量 | @xenova/transformers | WebAssembly 后端，CPU 可运行，无需 GPU |
+| 鉴权 | bcrypt + jose | 密码 hash + JWT，零外部依赖 |
+| 配置 | Zod + YAML | schema 校验 + YAML 配置，环境变量覆盖 |
 
 ---
 
 ## 快速开始
 
-### 1. 克隆与进入目录
+### 1. 克隆项目
 
 ```bash
 git clone https://github.com/lijx122/ai-assistant.git
@@ -140,108 +268,39 @@ cd ai-assistant
 ```bash
 cd assistant
 cp .env.example data/.env
+# 编辑 data/.env，填入必填项：
+#   ANTHROPIC_API_KEY=sk-ant-...
+#   JWT_SECRET=your_random_secret
+#   AUTH_USERNAME=admin
+#   AUTH_PASSWORD=your_password
 ```
 
-编辑 `data/.env`，填入以下**必填项**：
+### 3. 安装依赖并启动
 
 ```bash
-# Claude API 密钥（必需）
-ANTHROPIC_API_KEY=your_api_key_here
-
-# JWT 密钥（生产环境请使用强随机字符串）
-JWT_SECRET=your_random_secret
-
-# 登录账号
-AUTH_USERNAME=admin
-AUTH_PASSWORD=your_password
+cd assistant
+npm install
+npm run rebuild:pty          # 编译 node-pty 原生模块
+npm run dev                    # 开发模式启动
 ```
 
-可选配置：
-```bash
-# 如果启用 SearXNG 搜索
-WEB_SEARCH_BASE_URL=http://127.0.0.1:8887
+访问 `http://localhost:8888`，登录后即可使用。
 
-# 飞书集成（可选）
-LARK_APP_ID=xxx
+### 飞书接入（可选）
+
+```bash
+# 在 data/.env 中添加：
+LARK_APP_ID=cli_xxx
 LARK_APP_SECRET=xxx
-LARK_DEFAULT_CHAT_ID=xxx
+LARK_DEFAULT_CHAT_ID=ou_xxx
 ```
 
-### 3. 启动搜索服务（可选）
-
-如需网页搜索功能：
+### 微信接入（可选）
 
 ```bash
-cd ../searxng
-docker compose up -d
-```
-
-默认地址：`http://127.0.0.1:8887`
-
-### 4. 安装依赖并启动
-
-```bash
-cd ../assistant
-npm install        # 一次安装后端 + Web 前端全部依赖
-npm run rebuild:pty  # 编译 node-pty 原生模块
-npm run dev          # 开发模式启动
-```
-
-访问：`http://localhost:8888`
-
----
-
-## 常用命令
-
-```bash
-npm run build        # 构建 TypeScript
-npm run build:vue    # 构建 Vue 前端
-npm run build:all    # 构建前端 + 后端
-npm run dev          # 开发启动（build + 启动）
-npm run dev:watch    # 热重载模式
-npm run dev:vue      # 仅启动 Vue 开发服务器
-npm run dev:full     # 同时启动后端 watch + 前端 dev
-npm run test         # 运行测试（Vitest）
-npm run rebuild:pty  # 迁移机器后重编译 node-pty
-```
-
-说明：以上命令均在 `assistant/` 目录执行。
-
----
-
-## 配置说明
-
-### config.yaml
-
-主配置文件，控制端口、模型参数、日志等：
-
-```yaml
-server:
-  port: 8888
-  host: 0.0.0.0
-
-claude:
-  model: "claude-opus-4-6"      # 主模型
-  max_tokens: 4096              # 最大输出 Token
-  context_window_messages: 0    # 0 = 不限制轮次
-  compact:
-    enabled: true               # 超长对话自动压缩
-    token_limit: 40000
-    preserve_rounds: 4
-    summary_model: "claude-haiku-4-5-20251001"
-```
-
-### .env 模型配置
-
-```bash
-# 主对话模型
-MODEL_CHAT=claude-sonnet-4-6
-
-# Compact 摘要模型
-MODEL_COMPACT=claude-haiku-4-5-20251001
-
-# 任务/Agent 模型
-MODEL_AGENT=claude-sonnet-4-6
+# 在 data/.env 中添加微信 iLink 配置
+WEIXIN_ILINK_APP_ID=xxx
+WEIXIN_ILINK_APP_SECRET=xxx
 ```
 
 ---
@@ -249,41 +308,80 @@ MODEL_AGENT=claude-sonnet-4-6
 ## 项目结构
 
 ```
-.
-├── README.md           # 仓库级说明文档（唯一）
-├── .gitignore          # 仓库级忽略规则（唯一）
-├── assistant/           # 主项目
+ai-assistant/
+├── assistant/
 │   ├── src/
-│   │   ├── server.ts           # HTTP + WebSocket 服务
-│   │   ├── routes/             # API 路由
-│   │   ├── services/           # 业务逻辑
-│   │   │   ├── tools/          # 工具实现
-│   │   │   ├── agent-runner.ts # Claude 运行器
+│   │   ├── server.ts                  # HTTP + WebSocket 服务入口
+│   │   ├── config.ts                  # Zod 配置校验
+│   │   ├── channels/                  # 消息渠道抽象
+│   │   │   ├── base.ts                # Channel 基类 + ChannelManager
+│   │   │   ├── websocket.ts           # Web UI WebSocket 接入
+│   │   │   ├── lark.ts                # 飞书机器人
+│   │   │   └── weixin.ts              # 微信渠道
+│   │   ├── routes/                    # Hono 路由
+│   │   │   ├── chat.ts               # 对话 + Agent 触发
+│   │   │   ├── tasks.ts              # Cron 任务管理
+│   │   │   ├── terminal.ts           # PTY 会话管理
 │   │   │   └── ...
-│   │   ├── db/                 # SQLite 数据库
-│   │   └── config.ts           # 配置管理
-│   ├── web-vue/          # Vue 前端源码
-│   ├── web-vue-dist/     # Vue 构建产物（由后端静态托管）
-│   ├── data/             # 数据目录（含 .env）
-│   └── config.yaml       # 主配置
-│
-└── searxng/             # 搜索服务（可选）
-    └── docker-compose.yml
+│   │   ├── services/
+│   │   │   ├── agent-runner.ts       # Claude 多轮 Agent 循环
+│   │   │   ├── message-processor.ts  # 统一消息处理入口
+│   │   │   ├── context-compact.ts    # 上下文压缩
+│   │   │   ├── recall.ts             # FTS5 全文搜索
+│   │   │   ├── embedder.ts           # 本地 Transformer 向量生成
+│   │   │   ├── workspace-config.ts  # 工作区配置 Prompt 构建
+│   │   │   ├── skill-loader.ts       # .skills/ 动态加载
+│   │   │   └── tools/
+│   │   │       ├── registry.ts       # 工具注册与分发
+│   │   │       ├── confirmation-state.ts  # HITL 确认状态机
+│   │   │       ├── danger-detector.ts     # 危险命令检测
+│   │   │       ├── bash.ts / file.ts / recall.ts ...
+│   │   └── db/
+│   │       ├── schema.sql            # SQLite 表结构 + FTS5
+│   │       └── migrate.ts            # 增量迁移
+│   ├── web-vue/                      # Vue3 前端源码
+│   │   ├── views/                   # 对话 / 终端 / 文件管理等页面
+│   │   ├── components/              # 可复用组件
+│   │   └── ...
+│   ├── data/                        # 数据目录（不提交 Git）
+│   │   ├── .env                     # 密钥配置
+│   │   └── *.db                     # SQLite 数据库
+│   └── config.yaml                  # 主配置文件
+├── .skills/                         # 工具技能说明（Claude 动态读取）
+│   ├── git.md
+│   └── ...
+└── README.md
 ```
 
 ---
 
-## 安全注意事项
+## 配置参考
 
-1. **不要将 `data/.env` 提交到 Git**，已包含在 `.gitignore` 中
-2. **危险操作确认**：删除、移动、某些 bash 命令需要人工确认
-3. **文件访问限制**：通过 `config.yaml` 的 `files.allowed_roots` 控制可访问路径
-4. **JWT 密钥**：生产环境请使用强随机字符串
+### config.yaml 核心参数
+
+```yaml
+server:
+  port: 8888
+
+claude:
+  model: "claude-sonnet-4-6"
+  max_tokens: 4096
+  compact:
+    enabled: true
+    token_limit: 60000      # 超过此值触发压缩
+    preserve_rounds: 4     # 保留最近4轮
+    summary_model: "claude-haiku-4-5-20251001"
+
+runner:
+  idle_timeout_minutes: 60  # 空闲1小时后销毁 Runner
+  max_rounds: 20            # 单次对话最多20轮工具调用
+
+files:
+  allowed_roots: []         # 允许访问的目录，空=不限制
+```
 
 ---
 
 ## License
 
-ISC
-
----
+ISC — 可免费用于个人项目，商用请注意 Claude API 使用条款。
