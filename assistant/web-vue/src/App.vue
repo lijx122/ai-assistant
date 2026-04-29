@@ -74,6 +74,12 @@
         title="日志">
         <ScrollText class="w-5 h-5"/>
       </button>
+      <button @click="currentView='lessons'"
+        :class="['nav-link p-3.5 rounded-2xl',
+                 currentView==='lessons' ? 'active' : '']"
+        title="经验库">
+        <BookOpen class="w-5 h-5"/>
+      </button>
 
       <div class="mt-auto">
         <button @click="doLogout" class="nav-link p-3.5 rounded-2xl" title="退出">
@@ -407,7 +413,7 @@ import { api } from './api'
 import {
   MessageCircle, Code2, CalendarClock, BarChartBig,
   ScrollText, LayoutList, LogOut, ChevronDown, Plus, Lock,
-  Settings, FolderOpen, Folder, ArrowRightCircle, Pencil, Trash2, X, Menu
+  Settings, FolderOpen, Folder, ArrowRightCircle, Pencil, Trash2, X, Menu, BookOpen
 } from 'lucide-vue-next'
 import ChatView from './views/ChatView.vue'
 import TasksView from './views/TasksView.vue'
@@ -415,6 +421,7 @@ import DashboardView from './views/DashboardView.vue'
 import EngineeringView from './views/EngineeringView.vue'
 import LogsView from './views/LogsView.vue'
 import PlanView from './views/PlanView.vue'
+import LessonsView from './views/LessonsView.vue'
 import WorkspaceManager from './components/WorkspaceManager.vue'
 
 // 注册本地组件
@@ -460,6 +467,7 @@ const viewMap = {
   observability: markRaw(DashboardView),
   logs: markRaw(LogsView),
   plan: markRaw(PlanView),
+  lessons: markRaw(LessonsView),
 }
 const currentComponent = computed(() => viewMap[currentView.value])
 

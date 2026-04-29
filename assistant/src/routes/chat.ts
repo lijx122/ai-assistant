@@ -3,7 +3,7 @@ import { getDb } from '../db';
 import { authMiddleware } from '../middleware/auth';
 import { AuthContext } from '../types';
 import { workspaceLock } from '../services/workspace-lock';
-import { getRunner, AgentStreamCallback } from '../services/agent-runner';
+import { getRunner, findRunner, AgentStreamCallback } from '../services/agent-runner';
 import { getConfig } from '../config';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -96,10 +96,18 @@ chatRouter.post('/', async (c) => {
     // 序列化 content（支持字符串或多模态数组）
     const serializedContent = serializeContent(content);
 
-    // 2. Write User Message immediately
+    // 2. Write User Message immediately (with pre-run git hash for rollback)
+    const ws = db.prepare('SELECT root_path FROM workspaces WHERE id = ?').get(workspaceId) as { root_path: string } | undefined;
+    let preRunGitHash: string | null = null;
+    if (ws?.root_path) {
+        try {
+            const { getGitTracker } = await import('../services/git-tracker');
+            preRunGitHash = getGitTracker(workspaceId, ws.root_path).getCurrentFullHash();
+        } catch { /* no git */ }
+    }
     db.prepare(
-        'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, message_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-    ).run(internalMsgId, sessionId, workspaceId, user.userId, 'user', serializedContent, messageId || null, now);
+        'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, message_id, pre_run_git_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    ).run(internalMsgId, sessionId, workspaceId, user.userId, 'user', serializedContent, messageId || null, preRunGitHash, now);
 
     // 更新会话最后活跃时间和标题（从 content 中提取文本作为标题）
     let titleText = '';
@@ -285,7 +293,7 @@ async function runAgentTask(
         logger.sdk.info('agent-runner', `Task started: ${assistantMsgId}`, { workspaceId, sessionId, userId });
 
         // Run the agent
-        await runner.run(anthropicMsgs, systemPrompt, sessionId, workspaceId, onEvent);
+        await runner.run(anthropicMsgs, { systemPrompt, sessionId, workspaceId, onEvent });
 
         const duration = Date.now() - startTime;
 
@@ -694,4 +702,14 @@ chatRouter.delete('/messages/:id/response', (c) => {
     console.log(`[Message] Deleted ${deleted.changes} messages after ${messageId}`);
 
     return c.json({ success: true, deletedCount: deleted.changes });
+});
+
+// POST /api/chat/abort?workspaceId= — 打断当前 agent 运行
+chatRouter.post('/abort', (c) => {
+    const workspaceId = c.req.query('workspaceId');
+    if (!workspaceId) return c.json({ error: 'workspaceId is required' }, 400);
+    const runner = findRunner(workspaceId);
+    if (runner) runner.abort();
+    broadcastToWorkspace(workspaceId, { type: 'aborted', payload: null });
+    return c.json({ success: true });
 });

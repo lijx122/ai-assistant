@@ -9,7 +9,7 @@ import {
 // 确保工具已注册
 registerAllTools();
 
-export type AgentStreamCallback = (type: 'text' | 'tool_call' | 'tool_result' | 'usage' | 'error' | 'done' | 'confirmation_requested', content: any) => void;
+export type AgentStreamCallback = (type: 'text' | 'tool_call' | 'tool_result' | 'usage' | 'error' | 'done' | 'confirmation_requested' | 'aborted', content: any) => void;
 
 interface RunnerOptions {
     workspaceId: string;
@@ -24,11 +24,17 @@ interface PendingToolUse {
     input?: any;
 }
 
+type OrderedContentBlock =
+    | { type: 'text'; text: string }
+    | { type: 'thinking'; thinking: string; signature: string }
+    | { type: 'tool_use'; id: string; name: string; input: any };
+
 export class AgentRunner {
     private client: Anthropic;
     private lastActive: number;
     private idleTimer: NodeJS.Timeout | null = null;
     private isDestroyed: boolean = false;
+    private aborted: boolean = false;
 
     public workspaceId: string;
     private currentSessionId?: string; // 当前会话ID
@@ -71,29 +77,20 @@ export class AgentRunner {
         if (this.idleTimer) clearTimeout(this.idleTimer);
     }
 
+    public abort() {
+        this.aborted = true;
+    }
+
     public async run(
         initialMessages: Anthropic.MessageParam[],
-        systemPrompt?: string,
-        sessionIdOrOnEvent?: string | AgentStreamCallback,
-        workspaceIdOrOnEvent?: string | AgentStreamCallback,
-        onEvent?: AgentStreamCallback
+        opts: {
+            systemPrompt?: string;
+            sessionId?: string;
+            workspaceId?: string;
+            onEvent?: AgentStreamCallback;
+        } = {}
     ) {
-        let sessionId: string | undefined;
-        let workspaceId: string | undefined;
-        let eventCb: AgentStreamCallback | undefined = onEvent;
-
-        // 兼容旧签名：run(messages, systemPrompt, onEvent)
-        if (typeof sessionIdOrOnEvent === 'function') {
-            eventCb = sessionIdOrOnEvent;
-        } else {
-            sessionId = sessionIdOrOnEvent;
-            if (typeof workspaceIdOrOnEvent === 'function') {
-                // 兼容旧签名：run(messages, systemPrompt, sessionId, onEvent)
-                eventCb = workspaceIdOrOnEvent;
-            } else {
-                workspaceId = workspaceIdOrOnEvent;
-            }
-        }
+        const { systemPrompt, sessionId, workspaceId, onEvent: eventCb } = opts;
 
         if (this.isDestroyed) {
             if (eventCb) eventCb('error', 'Runner is destroyed');
@@ -117,6 +114,12 @@ export class AgentRunner {
             let terminated = false;
 
             for (let round = 1; round <= maxRounds; round++) {
+                // 打断检查
+                if (this.aborted) {
+                    if (eventCb) eventCb('aborted', null);
+                    break;
+                }
+
                 // 调用 Claude 一轮，收集所有 tool_use
                 const roundResult = await this.runOnce(messages, systemPrompt, eventCb);
                 const callback = eventCb;
@@ -127,19 +130,21 @@ export class AgentRunner {
                     break;
                 }
 
-                // 把本轮 assistant 内容加入 messages
-                const assistantContent: any[] = [];
-                if (roundResult.textBuffer) {
-                    assistantContent.push({ type: 'text', text: roundResult.textBuffer });
-                }
-                for (const tool of roundResult.toolUses) {
-                    assistantContent.push({
+                // 用有序 contentBlocks 构建 assistant 消息（保留 text/thinking/tool_use 原始排列）
+                const assistantContent: any[] = roundResult.contentBlocks.map(block => {
+                    if (block.type === 'text') {
+                        return { type: 'text', text: block.text };
+                    }
+                    if (block.type === 'thinking') {
+                        return { type: 'thinking', thinking: block.thinking, signature: block.signature };
+                    }
+                    return {
                         type: 'tool_use',
-                        id: tool.id,
-                        name: tool.name,
-                        input: tool.input,
-                    });
-                }
+                        id: block.id,
+                        name: block.name,
+                        input: block.input,
+                    };
+                });
 
                 if (assistantContent.length > 0) {
                     messages.push({
@@ -230,6 +235,8 @@ export class AgentRunner {
             }
         } catch (err: any) {
             if (eventCb) eventCb('error', err.message || 'Stream error');
+        } finally {
+            this.aborted = false;
         }
 
         this.poke();
@@ -362,6 +369,7 @@ export class AgentRunner {
     ): Promise<{
         textBuffer: string;
         toolUses: PendingToolUse[];
+        contentBlocks: OrderedContentBlock[];
         stopReason: string;
         error?: string;
     }> {
@@ -376,7 +384,7 @@ export class AgentRunner {
         // 防御：如果原始消息不为空但清理后为空，说明过滤过度，返回错误
         if (messages.length > 0 && safeMsgs.length === 0) {
             console.error('[AgentRunner] all messages were filtered by sanitization');
-            return { textBuffer: '', toolUses: [], stopReason: 'error', error: 'No valid messages to send after sanitization' };
+            return { textBuffer: '', toolUses: [], contentBlocks: [], stopReason: 'error', error: 'No valid messages to send after sanitization' };
         }
 
         // 日志：打印完整 context 的实际内容（用于诊断 blocks count: 0 问题）
@@ -417,30 +425,53 @@ export class AgentRunner {
         });
 
         const toolUses: PendingToolUse[] = [];
+        const contentBlocks: OrderedContentBlock[] = [];
         let currentTool: PendingToolUse | null = null;
+        let currentThinking = '';
+        let currentSignature = '';
         let textBuffer = '';
+        let currentTextBlock = '';
         let stopReason = 'end_turn';
 
         for await (const chunk of stream) {
             if (this.isDestroyed) {
                 stream.controller.abort();
-                return { textBuffer, toolUses, stopReason, error: 'Runner aborted mid-stream' };
+                return { textBuffer, toolUses, contentBlocks, stopReason, error: 'Runner aborted mid-stream' };
             }
 
             if (chunk.type === 'content_block_start') {
                 if (chunk.content_block.type === 'tool_use') {
+                    // flush current text block if any
+                    if (currentTextBlock) {
+                        contentBlocks.push({ type: 'text', text: currentTextBlock });
+                        currentTextBlock = '';
+                    }
                     currentTool = {
                         id: chunk.content_block.id,
                         name: chunk.content_block.name,
                         inputJson: '',
                     };
+                } else if (chunk.content_block.type === 'thinking') {
+                    // flush current text block if any
+                    if (currentTextBlock) {
+                        contentBlocks.push({ type: 'text', text: currentTextBlock });
+                        currentTextBlock = '';
+                    }
+                    currentThinking = '';
+                    currentSignature = '';
                 }
+                // text content_block_start: reset currentTextBlock (no-op, already empty after content_block_stop)
             } else if (chunk.type === 'content_block_delta') {
                 if (chunk.delta.type === 'text_delta') {
                     textBuffer += chunk.delta.text;
+                    currentTextBlock += chunk.delta.text;
                     if (onEvent) onEvent('text', chunk.delta.text);
                 } else if (chunk.delta.type === 'input_json_delta' && currentTool) {
                     currentTool.inputJson += chunk.delta.partial_json;
+                } else if (chunk.delta.type === 'thinking_delta') {
+                    currentThinking += chunk.delta.thinking;
+                } else if (chunk.delta.type === 'signature_delta') {
+                    currentSignature += chunk.delta.signature;
                 }
             } else if (chunk.type === 'content_block_stop') {
                 if (currentTool) {
@@ -457,8 +488,29 @@ export class AgentRunner {
                         name: currentTool.name,
                         input: currentTool.input,
                     });
+                    contentBlocks.push({
+                        type: 'tool_use',
+                        id: currentTool.id,
+                        name: currentTool.name,
+                        input: currentTool.input,
+                    });
                     toolUses.push(currentTool);
                     currentTool = null;
+                } else {
+                    // text 或 thinking content block 结束
+                    if (currentTextBlock) {
+                        contentBlocks.push({ type: 'text', text: currentTextBlock });
+                        currentTextBlock = '';
+                    }
+                    if (currentThinking || currentSignature) {
+                        contentBlocks.push({
+                            type: 'thinking',
+                            thinking: currentThinking,
+                            signature: currentSignature,
+                        });
+                        currentThinking = '';
+                        currentSignature = '';
+                    }
                 }
             } else if (chunk.type === 'message_stop') {
                 stopReason = (chunk as any).stop_reason || 'end_turn';
@@ -482,12 +534,13 @@ export class AgentRunner {
                 stopReason,
                 textBufferLength: textBuffer.length,
                 toolUseCount: toolUses.length,
+                contentBlockCount: contentBlocks.length,
                 lastMessageRole: safeMsgs.length > 0 ? safeMsgs[safeMsgs.length - 1]?.role : 'none',
                 messageCount: safeMsgs.length
             });
         }
 
-        return { textBuffer, toolUses, stopReason };
+        return { textBuffer, toolUses, contentBlocks, stopReason };
     }
 
     /**
@@ -565,6 +618,10 @@ export const cleanupDestroyedRunners = (): number => {
         console.log(`[AgentRunner] Cleaned up ${cleanedCount} destroyed runner(s)`);
     }
     return cleanedCount;
+};
+
+export const findRunner = (workspaceId: string): AgentRunner | undefined => {
+    return runners.get(workspaceId);
 };
 
 export const clearRunners = () => {

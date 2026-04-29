@@ -83,7 +83,7 @@ logs: {}
             { type: 'message_stop' }
         ]);
 
-        await runner.run([], 'system', cb);
+        await runner.run([], { systemPrompt: 'system', onEvent: cb });
 
         expect(events).toEqual([
             { type: 'text', payload: 'Hello' },
@@ -113,7 +113,7 @@ logs: {}
         const anthropicInstance = (Anthropic as unknown as Mock).mock.instances[0];
         anthropicInstance.messages.create.mockResolvedValue(asyncIterable);
 
-        await runner.run([], 'sys', cb);
+        await runner.run([], { systemPrompt: 'sys', onEvent: cb });
 
         expect(events.find(e => e.payload === 'Chunk1')).toBeDefined();
         expect(events.find(e => e.payload === 'Chunk2')).toBeUndefined();
@@ -129,7 +129,7 @@ logs: {}
         const anthropicInstance = (Anthropic as unknown as Mock).mock.instances[0];
         anthropicInstance.messages.create.mockRejectedValue(new Error('Network offline'));
 
-        await runner.run([], undefined, cb);
+        await runner.run([], { onEvent: cb });
 
         expect(events).toEqual([
             { type: 'error', payload: 'Network offline' }

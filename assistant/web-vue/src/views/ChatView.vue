@@ -369,6 +369,11 @@
                 title="从这条消息创建分支">
                 <GitBranch class="w-3.5 h-3.5 text-green-600"/>
               </button>
+              <button @click="rollbackToMessage(msg)"
+                class="p-1 rounded-lg bg-white/80 shadow-sm hover:bg-red-50 transition-colors"
+                title="回滚到此处（删除之后的消息并恢复 git 状态）">
+                <RotateCcw class="w-3.5 h-3.5 text-red-400"/>
+              </button>
               <button @click="startEditMessage(msg)"
                 class="p-1 rounded-lg bg-white/80 shadow-sm hover:bg-white transition-colors"
                 title="编辑消息">
@@ -595,7 +600,13 @@
           <kbd class="px-1.5 py-0.5 bg-white rounded border border-slate-200 text-[9px]">
             Enter</kbd>
         </div>
-        <button @click="sendMessage" :disabled="store.isStreaming || !inputText.trim()"
+        <button v-if="store.isStreaming" @click="abortAgent"
+          class="bg-red-500 text-white p-2.5 rounded-2xl shadow-md shrink-0
+                 hover:opacity-90 hover:-translate-y-0.5 transition-all mb-1"
+          title="暂停">
+          <Square class="w-4 h-4"/>
+        </button>
+        <button v-else @click="sendMessage" :disabled="!inputText.trim()"
           class="bg-oxygen-blue text-white p-2.5 rounded-2xl shadow-md
                  shadow-oxygen-blue/20 shrink-0 hover:opacity-90 hover:-translate-y-0.5
                  transition-all mb-1 disabled:opacity-40 disabled:hover:translate-y-0">
@@ -664,7 +675,7 @@ import { useAppStore } from '../stores/app'
 import { api } from '../api'
 import {
   Plus, FolderOpen, MessageCircle, X, Layers, Globe,
-  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon, Menu, ArrowDown, ArrowUp
+  Paperclip, Send, Check, CheckCircle, Loader2, XCircle, ChevronDown, Telescope, Download, Pencil, RotateCcw, GitBranch, FileIcon, Menu, ArrowDown, ArrowUp, Square
 } from 'lucide-vue-next'
 
 const store = useAppStore()
@@ -837,6 +848,25 @@ async function startBranchMessage(msg) {
     }
   } catch (e) {
     console.error('[Branch] Failed to create branch:', e)
+  }
+}
+
+// ── 对话回滚 ──
+
+async function rollbackToMessage(msg) {
+  if (!store.currentSession) return
+  if (!confirm(`回滚到「${getTextContent(msg)?.slice(0, 30) || '此消息'}」之前？\n这将删除此消息之后的所有内容，并恢复对应的 git 工作区状态。`)) return
+  try {
+    const data = await api.post(`/api/sessions/${store.currentSession.id}/rollback`, {
+      to_message_id: msg.id,
+    })
+    if (data?.success) {
+      // 本地直接截断消息列表
+      const idx = messages.value.findIndex(m => m.id === msg.id)
+      if (idx !== -1) messages.value = messages.value.slice(0, idx + 1)
+    }
+  } catch (e) {
+    console.error('[Rollback] failed:', e)
   }
 }
 
@@ -1114,6 +1144,17 @@ function getMsgTokenUsage(msg) {
   return msgTokenUsageMap.value[msg?.id] || null;
 }
 
+// ── 打断 ──
+
+async function abortAgent() {
+  if (!store.currentWorkspace) return
+  try {
+    await api.post(`/api/chat/abort?workspaceId=${store.currentWorkspace.id}`, {})
+  } catch (e) {
+    console.error('[abort] failed:', e)
+  }
+}
+
 // ── 发送消息 ──
 
 let isSending = false
@@ -1381,6 +1422,13 @@ function handleWSMessage(msg) {
       }
       break
 
+    case 'aborted':
+      store.isStreaming = false
+      streamingText.value = ''
+      streamingToolCalls.value = []
+      syncCurrentSessionMessages()
+      break
+
     case 'error':
       store.isStreaming = false
       streamingText.value = ''
@@ -1401,6 +1449,35 @@ function handleWSMessage(msg) {
     case 'confirmation_cancelled':
       console.log('[WS] confirmation event:', msg.type, msg.payload)
       break
+
+    // 对话回滚（服务端广播，同步前端状态）
+    case 'session_rollback': {
+      const { sessionId: rollbackSession, to_message_id } = msg.payload || {}
+      if (store.currentSession?.id === rollbackSession) {
+        const idx = messages.value.findIndex(m => m.id === to_message_id)
+        if (idx !== -1) messages.value = messages.value.slice(0, idx + 1)
+      }
+      break
+    }
+
+    // 分段消息（agent 在工具调用前的文字独立推送）
+    case 'new_message': {
+      const nm = msg.payload
+      if (nm && nm.role === 'assistant') {
+        let parsedContent = nm.content
+        try { parsedContent = JSON.parse(nm.content) } catch {}
+        messages.value.push({
+          id: nm.id,
+          role: 'assistant',
+          content: Array.isArray(parsedContent) ? parsedContent : [{ type: 'text', text: nm.content }],
+          status: 'complete',
+        })
+        // 清空流式文字（已作为独立消息推出）
+        streamingText.value = ''
+        nextTick(scrollToBottom)
+      }
+      break
+    }
 
     // 微信渠道事件（转发到全局事件让 WeixinManager 处理）
     case 'weixin_login_success':

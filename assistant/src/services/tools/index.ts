@@ -70,6 +70,10 @@ export { noteWriteTool, noteReadTool, noteSearchTool, noteWriteToolDefinition, n
 export { reminderSetTool, reminderSetToolDefinition } from './reminder';
 export { codeSearchTool, codeSearchToolDefinition, executeCodeSearch } from './code-search';
 export { codeAnalyzeTool, codeAnalyzeToolDefinition, executeCodeAnalyze } from './code-analyze';
+export { recordLessonTool, recordLessonToolDefinition, executeRecordLesson } from './record-lesson';
+export { browserActionTool, browserActionToolDefinition, executeBrowserAction } from './browser-action';
+export { desktopActionTool, desktopActionToolDefinition, executeDesktopAction } from './desktop-action';
+export { freshNewsSearchTool, freshNewsSearchToolDefinition, executeFreshNewsSearch } from './fresh-news-search';
 
 import { registerTools } from './registry';
 import { bashTool } from './bash';
@@ -87,6 +91,10 @@ import { noteWriteTool, noteReadTool, noteSearchTool } from './note';
 import { reminderSetTool } from './reminder';
 import { codeSearchTool } from './code-search';
 import { codeAnalyzeTool } from './code-analyze';
+import { recordLessonTool } from './record-lesson';
+import { browserActionTool } from './browser-action';
+import { desktopActionTool } from './desktop-action';
+import { freshNewsSearchTool } from './fresh-news-search';
 
 /**
  * 注册所有标准工具
@@ -115,6 +123,10 @@ export function registerAllTools(): void {
         reminderSetTool,
         codeSearchTool,
         codeAnalyzeTool,
+        recordLessonTool,
+        browserActionTool,
+        desktopActionTool,
+        freshNewsSearchTool,
     ]);
     console.log('[Tools] All standard tools registered');
 }

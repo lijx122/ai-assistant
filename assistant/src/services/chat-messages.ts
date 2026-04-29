@@ -60,7 +60,7 @@ export function mergeConsecutiveUserMessages(messages: Anthropic.MessageParam[])
 function getMessagesAfter(sessionId: string, timestamp: number): Anthropic.MessageParam[] {
     const db = getDb();
     const rows = db.prepare(
-        'SELECT role, content FROM messages WHERE session_id = ? AND created_at > ? ORDER BY created_at ASC'
+        'SELECT role, content FROM messages WHERE session_id = ? AND created_at > ? AND (is_partial IS NULL OR is_partial = 0) ORDER BY created_at ASC'
     ).all(sessionId, timestamp) as any[];
 
     return rows
@@ -99,7 +99,7 @@ export async function buildMessagesForSession(
         messages = [...compact.compacted_messages, ...newMessages];
     } else {
         const rows = db.prepare(
-            'SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+            'SELECT role, content FROM messages WHERE session_id = ? AND (is_partial IS NULL OR is_partial = 0) ORDER BY created_at ASC'
         ).all(sessionId) as any[];
 
         console.log(`[${logPrefix}] no compact cache, loading ${rows.length} messages from db`);

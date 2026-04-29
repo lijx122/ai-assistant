@@ -32,6 +32,8 @@ import { getTerminal, writeToTerminal, onTerminalData, touchTerminal, markTermin
 import { cleanupDestroyedRunners } from './services/agent-runner';
 import { larkChannel, webSocketChannel, weixinChannel } from './channels';
 import { weixinRouter } from './routes/weixin';
+import { lessonsRouter } from './routes/lessons';
+import { plansRouter } from './routes/plans';
 import { getDb } from './db';
 import { logger as appLogger } from './services/logger';
 import { hashSync } from 'bcrypt';
@@ -211,6 +213,8 @@ app.route('/api/tasks', taskRouter);
 app.route('/api/todos', todoRouter);
 app.route('/api/internal', internalRouter);
 app.route('/api/weixin', weixinRouter);
+app.route('/api/lessons', lessonsRouter);
+app.route('/api/plans', plansRouter);
 
 // Public Config API - 返回非敏感的默认配置
 app.get('/api/config/public', (c) => {

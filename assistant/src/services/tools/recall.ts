@@ -7,32 +7,47 @@
 
 import { getDb } from '../../db';
 import { embed, cosineSimilarity } from '../embedder';
+import { searchRelevantLessons } from '../lessons';
 import type { ToolDefinition, ToolExecutor, ToolContext, ToolResult, RegisteredTool } from './types';
 
 /** Recall 工具定义 */
 export const recallToolDefinition: ToolDefinition = {
   name: 'recall',
-  description: `在当前工作区历史对话中语义搜索相关内容。
+  description: `语义搜索历史对话或全局经验库（lessons）。
+
+source 参数说明：
+- "messages"（默认）：搜索当前工作区的历史对话记录
+- "lessons"：搜索全局经验库（你记录过的操作规则和教训），支持知识图谱扩展
+- "both"：同时搜索历史对话和经验库，混合排序返回
 
 重要规则：
-- 只在当前对话上下文中没有相关信息时才调用
-- 如果用户的问题在当前会话中已经讨论过，直接回答，不要调用 recall
-- 适合调用的场景：用户明确提到"之前"/"上次"/"你还记得"等回溯词
-- 不适合调用的场景：当前对话已有足够上下文、用户只是继续当前话题
+- 想找之前用户说过的话或讨论过的内容 → source="messages"
+- 想找过往的操作规则/教训/约束 → source="lessons"
+- 不清楚在哪 → source="both"
+- 只在当前对话上下文没有相关信息时才调用
 
-传入能代表用户意图的自然语言描述。`,
+传入能代表搜索意图的自然语言描述。`,
   input_schema: {
     type: 'object',
     properties: {
       query: {
         type: 'string',
-        description: '搜索意图描述，如"我们聊过的考试"或"Python异步相关讨论"'
+        description: '搜索意图描述，如"我们聊过的考试"或"TypeScript 编译相关规则"'
+      },
+      source: {
+        type: 'string',
+        enum: ['messages', 'lessons', 'both'],
+        description: '搜索来源：messages（历史对话）/ lessons（经验库）/ both（混合），默认 messages'
       },
       limit: {
         type: 'number',
         description: '返回条数，默认 2，最多 5',
         minimum: 1,
         maximum: 5
+      },
+      expand_graph: {
+        type: 'boolean',
+        description: '是否扩展知识图谱（lessons 模式下，命中教训的邻居也加入结果），默认 true'
       }
     },
     required: ['query']
@@ -232,48 +247,74 @@ async function vectorSearch(
  * 执行 recall 工具
  */
 export const executeRecall: ToolExecutor = async (
-  input: { query: string; limit?: number },
+  input: { query: string; source?: string; limit?: number; expand_graph?: boolean },
   context: ToolContext
 ): Promise<ToolResult> => {
-  const { query, limit = 2 } = input;
+  const { query, source = 'messages', limit = 2, expand_graph = true } = input;
   const { workspaceId } = context;
 
   if (!workspaceId) {
-    return {
-      success: false,
-      error: 'Missing workspaceId'
-    };
+    return { success: false, error: 'Missing workspaceId' };
   }
-
   if (!query || query.trim().length === 0) {
-    return {
-      success: false,
-      error: 'Query is required'
-    };
+    return { success: false, error: 'Query is required' };
   }
 
-  console.log(`[Recall] Tool called, query: "${query}"`);
+  const safeLimit = Math.min(limit, 5);
+  console.log(`[Recall] Tool called, query: "${query}", source: ${source}`);
 
   try {
-    const result = await vectorSearch(workspaceId, query, Math.min(limit, 5));
+    const allResults: any[] = [];
 
-    console.log(`[Recall] Found ${result.found} results`);
+    // 搜索历史对话
+    if (source === 'messages' || source === 'both') {
+      const msgResult = await vectorSearch(workspaceId, query, safeLimit);
+      for (const r of msgResult.results || []) {
+        allResults.push({ ...r, source: 'message', score: parseFloat(r.score || '0') });
+      }
+    }
+
+    // 搜索经验库
+    if (source === 'lessons' || source === 'both') {
+      const lessonResults = await searchRelevantLessons(query, {
+        topK: safeLimit,
+        threshold: 0.45,
+        expandGraph: expand_graph,
+      });
+
+      for (const l of lessonResults) {
+        allResults.push({
+          source: 'lesson',
+          score: l.score,
+          task_type: l.task_type,
+          title: l.title,
+          content: l.summary,
+          lesson_id: l.id,
+          edge_reason: l.edge_reason,
+          date: new Date(l.updated_at).toLocaleDateString('zh-CN', {
+            month: 'numeric', day: 'numeric',
+          }),
+        });
+      }
+    }
+
+    // 混合排序
+    allResults.sort((a, b) => b.score - a.score);
+    const limited = allResults.slice(0, safeLimit);
+
+    const found = limited.length;
+    let message = found > 0 ? `找到 ${found} 条相关内容` : '未找到相关记录';
+    if (source === 'both') message += `（历史对话 + 经验库混合）`;
+    if (source === 'lessons') message += `（来自全局经验库）`;
 
     return {
       success: true,
-      data: {
-        found: result.found,
-        message: result.message,
-        results: result.results
-      }
+      data: { found, message, results: limited, source }
     };
 
   } catch (error: any) {
     console.error('[Recall] Tool execution failed:', error);
-    return {
-      success: false,
-      error: `搜索失败: ${error.message || 'Unknown error'}`
-    };
+    return { success: false, error: `搜索失败: ${error.message || 'Unknown error'}` };
   }
 };
 

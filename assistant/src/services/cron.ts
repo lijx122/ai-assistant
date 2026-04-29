@@ -8,6 +8,9 @@ import { randomUUID } from 'crypto';
 import { createAlert, handleAlert } from './alert-handler';
 import { logger } from './logger';
 import { sendTaskNotification } from './notification';
+import { AgentRunner } from './agent-runner';
+import { buildSystemPrompt } from './message-processor';
+import { parseContent, serializeContent } from './chat-messages';
 
 const execAsync = promisify(exec);
 
@@ -301,7 +304,7 @@ async function executeShell(workspaceId: string, command: string): Promise<strin
 }
 
 /**
- * 执行 assistant 类型任务（发送到对话引擎）
+ * 执行 assistant 类型任务（用 AgentRunner 同步跑完，返回 AI 回复文本）
  */
 async function executeAssistant(
     workspaceId: string,
@@ -311,25 +314,54 @@ async function executeAssistant(
 ): Promise<string> {
     const db = getDb();
 
-    // 创建一个新的 session
+    // 创建 session
     const sessionId = randomUUID();
     const now = Date.now();
-
     db.prepare(
         `INSERT INTO sessions (id, workspace_id, user_id, channel, title, started_at, last_active_at)
-         VALUES (?, ?, ?, 'web', ?, ?, ?)`
+         VALUES (?, ?, ?, 'task', ?, ?, ?)`
     ).run(sessionId, workspaceId, userId, `[定时任务] ${taskName}`, now, now);
 
-    // 插入用户消息（即定时任务的命令）
-    const messageId = randomUUID();
+    // 插入用户消息
+    const userMsgId = randomUUID();
     db.prepare(
         `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at)
          VALUES (?, ?, ?, ?, 'user', ?, ?)`
-    ).run(messageId, sessionId, workspaceId, userId, command, now);
+    ).run(userMsgId, sessionId, workspaceId, userId, command, now);
 
-    // 注意：这里我们返回 session ID，实际执行由对话引擎异步处理
-    // 任务执行结果需要通过消息监听或后续查询获取
-    return `已创建会话 ${sessionId}，任务已入队处理`;
+    // 收集 AI 回复文本
+    let outputText = '';
+    const onEvent = (type: string, payload: any) => {
+        if (type === 'text' && typeof payload === 'string') {
+            outputText += payload;
+        }
+    };
+
+    // 构建 system prompt 和消息列表
+    const systemPrompt = await buildSystemPrompt(workspaceId, command);
+    const initialMessages = [{ role: 'user' as const, content: parseContent(command) }];
+
+    // 运行 agent
+    const runner = new AgentRunner({ workspaceId, onEvent });
+    try {
+        await runner.run(initialMessages, { systemPrompt, sessionId, workspaceId, onEvent });
+    } finally {
+        runner.destroy();
+    }
+
+    const replyText = outputText.trim() || '（无回复）';
+
+    // 落库 assistant 消息
+    const assistantMsgId = randomUUID();
+    const doneAt = Date.now();
+    db.prepare(
+        `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, created_at)
+         VALUES (?, ?, ?, ?, 'assistant', ?, 'complete', ?)`
+    ).run(assistantMsgId, sessionId, workspaceId, userId, serializeContent([{ type: 'text', text: replyText }]), doneAt);
+
+    db.prepare(`UPDATE sessions SET last_active_at = ? WHERE id = ?`).run(doneAt, sessionId);
+
+    return replyText.substring(0, 2000); // 截断避免 task_runs.output 过长
 }
 
 /**

@@ -455,3 +455,67 @@ sessionRouter.post('/:id/branch', async (c) => {
         messagesCopied: result.messagesCopied,
     });
 });
+
+/**
+ * POST /api/sessions/:sessionId/rollback
+ * body: { to_message_id: string }
+ * 回滚对话到指定消息（删除之后的所有消息），并可选 git reset --hard
+ */
+sessionRouter.post('/:sessionId/rollback', async (c) => {
+    const sessionId = c.req.param('sessionId');
+    const body = await c.req.json().catch(() => ({}));
+    const { to_message_id } = body;
+
+    if (!to_message_id) {
+        return c.json({ error: 'to_message_id is required' }, 400);
+    }
+
+    const db = getDb();
+
+    // 查出目标消息
+    const targetMsg = db.prepare(
+        'SELECT id, created_at, pre_run_git_hash FROM messages WHERE id = ? AND session_id = ?'
+    ).get(to_message_id, sessionId) as { id: string; created_at: number; pre_run_git_hash: string | null } | undefined;
+
+    if (!targetMsg) {
+        return c.json({ error: 'Message not found in this session' }, 404);
+    }
+
+    // 删除目标消息之后的所有消息
+    const deleted = db.prepare(
+        'DELETE FROM messages WHERE session_id = ? AND created_at > ?'
+    ).run(sessionId, targetMsg.created_at);
+
+    // 如果有 git hash，执行 reset --hard
+    let gitReset = false;
+    if (targetMsg.pre_run_git_hash) {
+        const session = db.prepare('SELECT workspace_id FROM sessions WHERE id = ?').get(sessionId) as { workspace_id: string } | undefined;
+        if (session) {
+            const ws = db.prepare('SELECT root_path FROM workspaces WHERE id = ?').get(session.workspace_id) as { root_path: string } | undefined;
+            if (ws?.root_path) {
+                try {
+                    const { getGitTracker } = await import('../services/git-tracker');
+                    const tracker = getGitTracker(session.workspace_id, ws.root_path);
+                    gitReset = tracker.resetHard(targetMsg.pre_run_git_hash);
+                    if (gitReset) {
+                        tracker.commit(`chore: rollback to message ${to_message_id.slice(0, 8)}`);
+                    }
+                } catch (e: any) {
+                    console.warn('[Rollback] git reset failed:', e.message);
+                }
+            }
+        }
+    }
+
+    // 广播回滚事件
+    const { broadcastToWorkspace } = await import('../routes/chat');
+    const session2 = db.prepare('SELECT workspace_id FROM sessions WHERE id = ?').get(sessionId) as { workspace_id: string } | undefined;
+    if (session2) {
+        broadcastToWorkspace(session2.workspace_id, {
+            type: 'session_rollback',
+            payload: { sessionId, to_message_id, deletedCount: deleted.changes, gitReset },
+        });
+    }
+
+    return c.json({ success: true, deletedCount: deleted.changes, gitReset });
+});

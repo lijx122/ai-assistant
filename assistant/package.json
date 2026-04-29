@@ -6,8 +6,8 @@
   "scripts": {
     "start": "node dist/server.js",
     "dev": "npm run build && node dist/server.js",
-    "dev:watch": "npm run copy:assets && tsc -w & nodemon --watch dist dist/server.js",
-    "build": "tsc && npm run copy:assets",
+    "dev:watch": "npm run copy:assets && node node_modules/typescript/bin/tsc -w & nodemon --watch dist dist/server.js",
+    "build": "node node_modules/typescript/bin/tsc && npm run copy:assets",
     "build:vue": "vite build --config web-vue/vite.config.js",
     "build:all": "npm run build:vue && npm run build",
     "dev:vue": "vite --config web-vue/vite.config.js",

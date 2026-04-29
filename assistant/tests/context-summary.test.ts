@@ -7,7 +7,7 @@ const mockConfig = {
     claude: {
         api_key: 'test_key',
         base_url: 'https://api.anthropic.com',
-        model: 'claude-opus-4-6',
+        model: 'test-model',
         max_tokens: 4096,
         count_tokens_enabled: false,
         count_tokens_fixed: 2000,
@@ -17,7 +17,7 @@ const mockConfig = {
             threshold_ratio: 0.8,
             token_limit: 10000,  // 测试中设为较低值，使现有测试数据能触发压缩
             preserve_rounds: 4,
-            summary_model: 'claude-haiku-4-5',
+            summary_model: 'test-summary-model',
             max_summary_tokens: 500,
         },
     },

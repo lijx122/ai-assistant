@@ -384,10 +384,13 @@ taskRouter.post('/:id/pause', (c) => {
 
     const db = getDb();
 
-    // 验证任务存在且属于当前用户
-    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as Task | undefined;
+    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | undefined;
     if (!existingTask) {
-        return c.json({ error: 'Task not found or access denied' }, 404);
+        return c.json({ error: 'Task not found' }, 404);
+    }
+    const workspace = db.prepare('SELECT id FROM workspaces WHERE id = ? AND user_id = ?').get(existingTask.workspace_id, userId);
+    if (!workspace) {
+        return c.json({ error: 'Access denied' }, 403);
     }
 
     if (existingTask.status !== 'active') {
@@ -416,10 +419,13 @@ taskRouter.post('/:id/resume', (c) => {
 
     const db = getDb();
 
-    // 验证任务存在且属于当前用户
-    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as Task | undefined;
+    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | undefined;
     if (!existingTask) {
-        return c.json({ error: 'Task not found or access denied' }, 404);
+        return c.json({ error: 'Task not found' }, 404);
+    }
+    const workspace = db.prepare('SELECT id FROM workspaces WHERE id = ? AND user_id = ?').get(existingTask.workspace_id, userId);
+    if (!workspace) {
+        return c.json({ error: 'Access denied' }, 403);
     }
 
     if (existingTask.status !== 'paused') {
@@ -448,10 +454,13 @@ taskRouter.post('/:id/trigger', async (c) => {
 
     const db = getDb();
 
-    // 验证任务存在且属于当前用户
-    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ? AND user_id = ?').get(id, userId) as Task | undefined;
+    const existingTask = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id) as Task | undefined;
     if (!existingTask) {
-        return c.json({ error: 'Task not found or access denied' }, 404);
+        return c.json({ error: 'Task not found' }, 404);
+    }
+    const workspace = db.prepare('SELECT id FROM workspaces WHERE id = ? AND user_id = ?').get(existingTask.workspace_id, userId);
+    if (!workspace) {
+        return c.json({ error: 'Access denied' }, 403);
     }
 
     // 异步执行，不等待结果

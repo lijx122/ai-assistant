@@ -4,7 +4,7 @@ import { getDb } from '../db';
 import { authMiddleware } from '../middleware/auth';
 import { AuthContext } from '../types';
 import { readdir, readFile, writeFile, stat, realpath, access, constants, mkdir, rename, rm, cp } from 'fs/promises';
-import { resolve, join, dirname, relative, isAbsolute, normalize } from 'path';
+import { resolve, join, dirname, relative, isAbsolute, normalize, sep } from 'path';
 import { existsSync } from 'fs';
 
 export const filesRouter = new Hono<{ Variables: { user: AuthContext; workspaceId?: string; resolvedPath?: { absolutePath: string; isAllowed: boolean } } }>();
@@ -60,8 +60,9 @@ async function resolveSafePath(targetPath: string, workspaceId: string): Promise
 
     const isAllowed = allowedRoots.some(root => {
         const normalizedRoot = normalize(resolve(root));
-        // 确保路径以 root 开头（防止 ../ 绕过）
+        // 确保路径以 root 开头（防止 ../ 绕过），同时兼容 Windows 和 Unix 路径分隔符
         return absolutePath === normalizedRoot ||
+               absolutePath.startsWith(normalizedRoot + sep) ||
                absolutePath.startsWith(normalizedRoot + '/');
     });
 

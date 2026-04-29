@@ -226,11 +226,8 @@ function loadSessionHistory(sessionId: string, limit: number): { role: 'user' | 
 
     const rows = db.prepare(query).all(...params) as MessageRow[];
 
-    console.log(`[Lark] loadSessionHistory: sessionId=${sessionId}, rows=${rows.length}`);
-    if (rows.length === 0) {
-        // Debug: check what's in the db
-        const allRows = db.prepare('SELECT session_id, role, LENGTH(content) as len FROM messages LIMIT 10').all() as any[];
-        console.log(`[Lark] Debug - all messages:`, JSON.stringify(allRows));
+    if (rows.length > 0) {
+        console.log(`[Lark] loadSessionHistory: sessionId=${sessionId}, rows=${rows.length}`);
     }
 
     // Bug 修复：压缩历史消息中的 tool_result 内容（除最后一条外）
@@ -710,7 +707,7 @@ export const startLarkService = () => {
                         return;
                     }
 
-                    await runner.run(anthropicMsgs, systemPrompt, sessionId, wsId, onEvent);
+                    await runner.run(anthropicMsgs, { systemPrompt, sessionId, workspaceId: wsId, onEvent });
                     const duration = Date.now() - startTime;
 
                     // ========================================

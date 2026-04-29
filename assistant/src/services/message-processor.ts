@@ -21,6 +21,7 @@ import { indexMessage } from './message-indexer';
 import { deliveryQueue } from './channel-delivery';
 import { logger } from './logger';
 import { clearSkillCache } from './skill-loader';
+import { searchRelevantLessons } from './lessons';
 
 /**
  * 构建 System Prompt
@@ -142,6 +143,59 @@ Git：git_history · git_revert
 
         systemPromptParts.push(skillSection);
     }
+
+    // 3.5-A. 过往教训（动态注入，按语义相关性检索）
+    try {
+        const lessons = await searchRelevantLessons(userContent, {
+            topK: 5,
+            threshold: 0.45,
+            expandGraph: true,
+        });
+        if (lessons.length > 0) {
+            const capped = lessons.slice(0, 3); // 总量 >2000 字时裁剪到 top-3
+            const lines = capped.map(l => {
+                let line = `- [${l.task_type}] ${l.title}：${l.summary}`;
+                if (l.edge_reason) line += `\n  (关联来源: ${l.edge_reason})`;
+                return line;
+            });
+            const totalLen = lines.join('\n').length;
+            const finalLines = totalLen > 2000 ? lines.slice(0, 3) : lines;
+            systemPromptParts.push(`## 过往教训\n\n以下是与本次任务语义相关的历史经验，请在处理前阅读并遵守：\n\n${finalLines.join('\n')}`);
+        }
+    } catch {
+        // 教训检索失败静默降级
+    }
+
+    // 3.5-B. Reflection 指令（静态）
+    systemPromptParts.push(`## Reflection 指令
+
+当你观察到用户在纠正你的做法（包含「不对 / 别这样 / 下次 / 以后 / 记住 / 应该」等表述），或明确描述一条「将来同类任务应该遵守的规则」时，主动调用 record_lesson 工具写入经验库。
+
+只记录可复用的规则，不记一次性事实或用户当前状态。如果发现新教训与过往某条教训相关/矛盾/细化，用 links 参数建立关联（relation 填 related/contradicts/refines）。`);
+
+    // 3.5-C. 委派质量指令（静态）
+    systemPromptParts.push(`## 委派质量指令
+
+调用 claude_code 工具前，必须在参数里塞齐上下文：
+- project_context.cwd_note：工作目录语义（如「ClaudeOS 主项目，Node/TS/Vue3 + SQLite」）
+- project_context.files_of_interest：涉及文件的完整路径数组
+- project_context.failure_log：如果是修复失败，填入上次报错日志
+- project_context.extra_constraints：项目硬约束（如「Windows + Git Bash、conventional commits」）
+
+不要只丢一句 task 就调用——上下文不全，输出质量就低。`);
+
+    // 3.5-D. 工具选择边界（静态）
+    systemPromptParts.push(`## 工具选择边界（硬性规则）
+
+遇到下列场景必须调用指定工具，不要自己写脚本/代码实现：
+
+- **定时 / 周期执行**：调 create_task（cron 表达式 + 任务描述），不要在 shell 脚本写 crontab，不要在 JS 写 setInterval，不要在 Python 写 schedule.every
+- **搜历史对话 / 查过往教训**：调 recall（传 source='lessons' 或 'both'），不要自己读 SQLite
+- **时效性信息查询（新闻/金融/时事）**：调 fresh_news_search，不要直接 web_search 后手工排版
+- **代码搜索**：优先 code_search / recall，不要用 bash grep -r
+- **文件读写**：用 read_file / write_file，不要写 bash cat/echo 重定向
+
+这条清单不是建议，是硬性规则——写脚本复刻工具功能就是失职。`);
 
     // 4. 基础角色定义
     systemPromptParts.push('You are a helpful personal assistant.');
@@ -669,7 +723,7 @@ async function runAgentTaskForChannel(
         const startTime = Date.now();
 
         // 运行 Agent
-        await runner.run(anthropicMsgs, systemPrompt, sessionId, workspaceId, onEvent);
+        await runner.run(anthropicMsgs, { systemPrompt, sessionId, workspaceId, onEvent });
 
         const duration = Date.now() - startTime;
 

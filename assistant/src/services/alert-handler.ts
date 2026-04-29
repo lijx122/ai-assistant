@@ -279,7 +279,7 @@ You are a system monitoring assistant. Analyze alerts and provide clear, actiona
 
     // 运行 Agent
     const runner = getRunner(workspaceId, onEvent);
-    await runner.run(messages, systemPrompt.trim(), sessionId, workspaceId, onEvent);
+    await runner.run(messages, { systemPrompt: systemPrompt.trim(), sessionId, workspaceId, onEvent });
 
     // 保存 AI 回复到数据库
     if (responseText) {

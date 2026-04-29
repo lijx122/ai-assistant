@@ -222,6 +222,30 @@ export class GitTracker {
             return { files: 0, insertions: 0, deletions: 0 }
         }
     }
+    /**
+     * 获取当前完整 commit hash（用于回滚记录）
+     */
+    getCurrentFullHash(): string | null {
+        if (!this.ensureRepo()) return null;
+        try {
+            return this.execGit('git rev-parse HEAD').trim();
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 硬重置到指定 hash
+     */
+    resetHard(hash: string): boolean {
+        if (!this.ensureRepo()) return false;
+        try {
+            this.execGit(`git reset --hard ${hash}`);
+            return true;
+        } catch {
+            return false;
+        }
+    }
 }
 
 // 缓存实例，避免重复创建

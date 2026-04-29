@@ -363,6 +363,75 @@ const migrations: Migration[] = [
             ALTER TABLE tasks ADD COLUMN notify_on_success INTEGER DEFAULT 0;
         `,
     },
+    {
+        version: 25,
+        name: 'create_lessons_and_lesson_edges',
+        sql: `
+            CREATE TABLE IF NOT EXISTS lessons (
+              id                   TEXT PRIMARY KEY,
+              task_type            TEXT NOT NULL,
+              title                TEXT NOT NULL,
+              summary              TEXT NOT NULL,
+              embedding            BLOB NOT NULL,
+              md_path              TEXT NOT NULL,
+              source_session_id    TEXT,
+              source_message_id    TEXT,
+              source_workspace_id  TEXT,
+              hit_count            INTEGER DEFAULT 0,
+              created_at           INTEGER NOT NULL,
+              updated_at           INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_lessons_task_type ON lessons(task_type);
+            CREATE TABLE IF NOT EXISTS lesson_edges (
+              from_id    TEXT NOT NULL,
+              to_id      TEXT NOT NULL,
+              relation   TEXT NOT NULL,
+              strength   REAL DEFAULT 1.0,
+              created_at INTEGER NOT NULL,
+              PRIMARY KEY (from_id, to_id, relation)
+            );
+            CREATE INDEX IF NOT EXISTS idx_edges_from ON lesson_edges(from_id);
+            CREATE INDEX IF NOT EXISTS idx_edges_to ON lesson_edges(to_id);
+        `,
+    },
+    {
+        version: 26,
+        name: 'create_plans_and_plan_steps',
+        sql: `
+            CREATE TABLE IF NOT EXISTS plans (
+              id           TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              title        TEXT NOT NULL,
+              requirement  TEXT NOT NULL,
+              status       TEXT NOT NULL DEFAULT 'draft',
+              created_at   INTEGER NOT NULL,
+              updated_at   INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_plans_workspace ON plans(workspace_id, created_at DESC);
+            CREATE TABLE IF NOT EXISTS plan_steps (
+              id          TEXT PRIMARY KEY,
+              plan_id     TEXT NOT NULL,
+              idx         INTEGER NOT NULL,
+              title       TEXT NOT NULL,
+              description TEXT,
+              status      TEXT NOT NULL DEFAULT 'pending',
+              result      TEXT,
+              created_at  INTEGER NOT NULL,
+              updated_at  INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_plan_steps_plan ON plan_steps(plan_id, idx);
+        `,
+    },
+    {
+        version: 27,
+        name: 'add_pre_run_git_hash_to_messages',
+        sql: `ALTER TABLE messages ADD COLUMN pre_run_git_hash TEXT;`,
+    },
+    {
+        version: 28,
+        name: 'add_is_partial_to_messages',
+        sql: `ALTER TABLE messages ADD COLUMN is_partial INTEGER DEFAULT 0;`,
+    },
 ];
 
 /**

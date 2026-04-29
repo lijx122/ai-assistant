@@ -109,14 +109,24 @@ export class WeixinChannel extends Channel {
         return true;
     }
 
-    async sendAlert(text: string, options?: AlertOptions): Promise<boolean> {
-        // 告警发送到第一个活跃账号
-        const firstAccount = this.accounts.values().next().value;
-        if (!firstAccount) return false;
-
-        // TODO: 实现告警消息发送
-        console.log('[Weixin] sendAlert:', text.slice(0, 50));
-        return true;
+    async sendAlert(text: string, _options?: AlertOptions): Promise<boolean> {
+        const alertText = `[ALERT] ${text}`;
+        const db = getDb();
+        let anySuccess = false;
+        for (const account of this.accounts.values()) {
+            const row = db.prepare(
+                'SELECT last_sender_id FROM weixin_accounts WHERE id = ?'
+            ).get(account.id) as { last_sender_id: string | null } | undefined;
+            const senderId = row?.last_sender_id;
+            if (!senderId) continue;
+            try {
+                await ilinkApi.sendTextMessage(account.bot_token, senderId, alertText, '');
+                anySuccess = true;
+            } catch (e: any) {
+                console.warn(`[Weixin] sendAlert failed for account ${account.id}:`, e.message);
+            }
+        }
+        return anySuccess;
     }
 
     async waitReply(timeoutMs?: number): Promise<ReplyResult> {

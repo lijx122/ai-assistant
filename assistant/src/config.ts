@@ -41,9 +41,9 @@ if (missingVars.length > 0) {
 
 // 模型配置 - 统一从环境变量读取
 export const MODELS = {
-    chat: process.env.MODEL_CHAT || 'claude-sonnet-4-6',
-    compact: process.env.MODEL_COMPACT || 'claude-haiku-4-5',
-    agent: process.env.MODEL_AGENT || 'claude-sonnet-4-6',
+    chat: process.env.MODEL_CHAT || '',
+    compact: process.env.MODEL_COMPACT || '',
+    agent: process.env.MODEL_AGENT || '',
 };
 
 // ========== Schema 定义 ==========
