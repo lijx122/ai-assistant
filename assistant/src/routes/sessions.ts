@@ -5,7 +5,7 @@ import { AuthContext } from '../types';
 import { randomUUID } from 'crypto';
 import { resolve } from 'path';
 import { existsSync, unlinkSync, rmdirSync } from 'fs';
-import { getAllCompacts } from '../services/context-summary';
+import { getAllCompactsLight } from '../services/context-summary';
 import { archiveSession } from '../services/archiver';
 import { messageCache } from '../services/message-cache';
 
@@ -194,7 +194,8 @@ sessionRouter.get('/:id/messages', (c) => {
     // ── Step 2：缓存未命中，查数据库 ──
     const t1 = Date.now();
     const rows = db.prepare(
-        'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+        `SELECT id, session_id, workspace_id, user_id, role, content, status, is_partial, created_at
+         FROM messages WHERE session_id = ? ORDER BY created_at ASC`
     ).all(sessionId) as any[];
     const dbMs = Date.now() - t1;
 
@@ -208,9 +209,14 @@ sessionRouter.get('/:id/messages', (c) => {
 
     // ── Step 3：并行查询 compacts ──
     const t3 = Date.now();
-    const compacts = getAllCompacts(sessionId);
+    const compacts = getAllCompactsLight(sessionId);
     const formattedCompacts = compacts.map(c => {
-        const afterCount = rows.filter(m => m.created_at > c.compacted_at).length;
+        // rows 按 created_at ASC 有序，从尾部向前遍历定位边界
+        let afterCount = 0;
+        for (let i = rows.length - 1; i >= 0; i--) {
+            if (rows[i].created_at > c.compacted_at) afterCount++;
+            else break;
+        }
         const beforeCount = rows.length - afterCount;
         return {
             compacted_at: c.compacted_at,

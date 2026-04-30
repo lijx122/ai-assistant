@@ -314,6 +314,33 @@ export function getAllCompacts(sessionId: string): CompactSnapshot[] {
 }
 
 /**
+ * 获取 session 的所有 compact 快照（轻量版，不含 compacted_messages）
+ */
+export function getAllCompactsLight(sessionId: string): Array<{
+    id: string;
+    session_id: string;
+    workspace_id: string;
+    compacted_at: number;
+    summary: string;
+    original_tokens: number;
+    compacted_tokens: number;
+}> {
+    const db = getDb();
+    try {
+        const rows = db.prepare(
+            `SELECT id, session_id, workspace_id, compacted_at, summary, original_tokens, compacted_tokens
+             FROM session_compacts
+             WHERE session_id = ?
+             ORDER BY compacted_at ASC`
+        ).all(sessionId) as any[];
+        return rows;
+    } catch (error) {
+        console.error('[ContextSummary] 读取所有 compact 快照失败:', error);
+        return [];
+    }
+}
+
+/**
  * 主入口：判断是否需要压缩，如需要则执行摘要压缩
  *
  * @param messages 原始消息列表

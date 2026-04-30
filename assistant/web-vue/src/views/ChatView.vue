@@ -741,10 +741,8 @@ async function selectSession(s) {
   const data = await api.get(`/api/sessions/${s.id}/messages`)
   if (data?.messages) messages.value = parseMessages(data.messages)
   expandedToolBlocks.value = {}
-  messagePaneKey.value += 1
   await nextTick()
-  // fromCache=true（缓存命中）时无需滚动，缓存命中 <5ms
-  if (!data?.fromCache) scrollToBottom()
+  scrollToBottom()
   await loadTodo()
 }
 
@@ -951,11 +949,15 @@ function isOnlyToolResult(content) {
 }
 
 function parseMessages(raw) {
+  // 缓存已解析的 content，避免重复 JSON.parse
+  const contentCache = new Map()
+
   // 第一遍：收集所有 tool_result
   const toolOutputs = {}
   raw.forEach(msg => {
     if (msg.role === 'user') {
       const content = tryParseContent(msg.content)
+      contentCache.set(msg.id, content)
       if (Array.isArray(content)) {
         content.forEach(block => {
           if (block.type === 'tool_result') {
@@ -971,13 +973,17 @@ function parseMessages(raw) {
     .filter(msg => {
       // 过滤掉仅包含 tool_result 的 user 消息
       if (msg.role === 'user') {
-        const content = tryParseContent(msg.content)
+        const content = contentCache.has(msg.id)
+          ? contentCache.get(msg.id)
+          : tryParseContent(msg.content)
         if (isOnlyToolResult(content)) return false
       }
       return true
     })
     .map(msg => {
-      const content = tryParseContent(msg.content)
+      const content = contentCache.has(msg.id)
+        ? contentCache.get(msg.id)
+        : tryParseContent(msg.content)
       // 给 assistant 消息中的 tool_use 注入 output
       if (msg.role === 'assistant' && Array.isArray(content)) {
         return {
