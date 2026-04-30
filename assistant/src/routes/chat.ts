@@ -46,11 +46,10 @@ chatRouter.get('/history', (c) => {
     if (!workspaceId) return c.json({ error: 'Missing workspaceId' }, 400);
 
     const db = getDb();
-    const rows = db.prepare('SELECT * FROM messages WHERE workspace_id = ? ORDER BY created_at ASC').all(workspaceId) as any[];
+    const rows = db.prepare('SELECT * FROM messages WHERE workspace_id = ? AND (is_partial IS NULL OR is_partial = 0) ORDER BY created_at ASC').all(workspaceId) as any[];
 
-    // 解析 content JSON，过滤掉 streaming 状态的占位消息（前端不需要显示）
+    // 解析 content JSON
     const messages = rows
-        .filter(r => r.status !== 'streaming') // 过滤掉正在生成的占位消息
         .map(r => ({
             ...r,
             content: parseContent(r.content),
@@ -157,8 +156,8 @@ chatRouter.post('/', async (c) => {
     // ── 4. Pre-insert assistant placeholder message with streaming status ──
     const assistantMsgId = randomUUID();
     db.prepare(
-        `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', ?)`
+        `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, is_partial, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', 1, ?)`
     ).run(assistantMsgId, sessionId, workspaceId, user.userId, 'assistant', '', now);
 
     // 5. Enqueue agent task (async, don't wait)
@@ -228,10 +227,8 @@ async function runAgentTask(
         }));
         console.log('[Chat] Context summary:', JSON.stringify(msgSummary));
 
-        // Content blocks collection
-        const assistantContentBlocks: any[] = [];
-        const toolResultBlocks: any[] = [];
-        let currentText = '';
+        // Per-round saving via round_complete
+        let currentPlaceholderId = assistantMsgId;
         let runtimeError: string | null = null;
         let inputTokens = 0;
         let outputTokens = 0;
@@ -247,35 +244,40 @@ async function runAgentTask(
 
             if (type === 'text') {
                 streamBuffer += payload;
-                currentText += payload;
 
                 const now = Date.now();
                 if (now - lastSaveTime >= SAVE_INTERVAL_MS) {
-                    updateStreamingContent(assistantMsgId, streamBuffer);
+                    updateStreamingContent(currentPlaceholderId, streamBuffer);
                     lastSaveTime = now;
                 }
             } else if (type === 'tool_call') {
-                // Save previous text chunk before tool call
-                if (currentText) {
-                    assistantContentBlocks.push({ type: 'text', text: currentText });
-                    currentText = '';
-                }
-                assistantContentBlocks.push({
-                    type: 'tool_use',
-                    id: payload.tool_use_id,
-                    name: payload.name,
-                    input: payload.input,
-                });
+                // 仅广播，round_complete 携带完整数据
             } else if (type === 'tool_result') {
-                toolResultBlocks.push({
-                    type: 'tool_result',
-                    tool_use_id: payload.tool_use_id,
-                    content: typeof payload.result === 'string'
-                        ? payload.result
-                        : JSON.stringify(payload.result),
-                });
+                // 仅广播
+            } else if (type === 'round_complete') {
+                const { assistant, toolResults } = payload;
+
+                // 保存本轮 assistant 消息
+                finalizeMessage(currentPlaceholderId, assistant, { input: inputTokens, output: outputTokens }, sessionId);
+
+                // 保存 tool_result 用户消息
+                for (const tr of toolResults) {
+                    const toolResultMsgId = randomUUID();
+                    db.prepare(
+                        'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+                    ).run(toolResultMsgId, sessionId, workspaceId, userId, 'user', serializeContent([tr]), Date.now());
+                }
+
+                // 为下一轮创建 streaming 占位符（is_partial=1，被 buildMessagesForSession 排除）
+                const newPlaceholderId = randomUUID();
+                const nowTs = Date.now();
+                db.prepare(
+                    `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, is_partial, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', 1, ?)`
+                ).run(newPlaceholderId, sessionId, workspaceId, userId, 'assistant', '', nowTs);
+                currentPlaceholderId = newPlaceholderId;
+                streamBuffer = '';
             } else if (type === 'done') {
-                // Bug fix: Log done event
                 console.log(`[Chat] Done event received for message ${assistantMsgId}`);
             } else if (type === 'error') {
                 console.error(`[Chat] Error event received:`, payload);
@@ -298,39 +300,18 @@ async function runAgentTask(
         const duration = Date.now() - startTime;
 
         // Log agent completion
-        const contentLength = assistantContentBlocks.reduce((sum, b) => sum + (b.text?.length || 0), 0);
-        logger.sdk.info('agent-runner', `Task done: ${assistantMsgId}`, { workspaceId, sessionId, duration, contentLength });
+        logger.sdk.info('agent-runner', `Task done: ${assistantMsgId}`, { workspaceId, sessionId, duration });
 
-        // Save final text chunk
-        if (currentText) {
-            assistantContentBlocks.push({ type: 'text', text: currentText });
-        }
-
-        // 【修复】先保存工具结果，再最终化助手消息 — 避免 tool_use 无对应 tool_result
-        for (const block of toolResultBlocks) {
-            const toolResultMsgId = randomUUID();
-            db.prepare(
-                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-            ).run(toolResultMsgId, sessionId, workspaceId, userId, 'user', serializeContent([block]), Date.now());
-        }
-
-        // Finalize the assistant message (tool_results already safely stored)
-        console.log(`[Chat] Finalizing message ${assistantMsgId}, blocks count: ${assistantContentBlocks.length}`);
-        if (assistantContentBlocks.length > 0) {
-            finalizeMessage(assistantMsgId, assistantContentBlocks, { input: inputTokens, output: outputTokens }, sessionId);
-            console.log(`[Chat] Message ${assistantMsgId} finalized successfully`);
+        // 最终完成：更新最后一个占位符
+        if (runtimeError) {
+            const errorContent = [{ type: 'text', text: `执行失败：${runtimeError}` }];
+            finalizeMessage(currentPlaceholderId, errorContent, { input: inputTokens, output: outputTokens }, sessionId);
+        } else if (streamBuffer) {
+            finalizeMessage(currentPlaceholderId, [{ type: 'text', text: streamBuffer }], { input: inputTokens, output: outputTokens }, sessionId);
         } else {
-            if (runtimeError) {
-                const errorContent = [{ type: 'text', text: `执行失败：${runtimeError}` }];
-                finalizeMessage(assistantMsgId, errorContent, { input: inputTokens, output: outputTokens }, sessionId);
-                console.log(`[Chat] Message ${assistantMsgId} finalized with runtime error`);
-            } else {
-                // If no content, mark as complete with empty content
-                console.log(`[Chat] No content blocks, marking as complete with empty content`);
-                db.prepare(
-                    `UPDATE messages SET status = 'complete', streaming_content = NULL, input_tokens = ?, output_tokens = ? WHERE id = ?`
-                ).run(inputTokens, outputTokens, assistantMsgId);
-            }
+            db.prepare(
+                `UPDATE messages SET status = 'complete', streaming_content = NULL, is_partial = 0, input_tokens = ?, output_tokens = ? WHERE id = ?`
+            ).run(inputTokens, outputTokens, currentPlaceholderId);
         }
 
         // 清空 token 缓存（消息已完成）
@@ -379,7 +360,7 @@ function finalizeMessage(msgId: string, contentBlocks: any[], tokens?: { input: 
     const db = getDb();
     console.log(`[Chat] Executing finalizeMessage for ${msgId}, content length: ${JSON.stringify(contentBlocks).length}`);
     const result = db.prepare(
-        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete', input_tokens = ?, output_tokens = ? WHERE id = ?`
+        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete', is_partial = 0, input_tokens = ?, output_tokens = ? WHERE id = ?`
     ).run(serializeContent(contentBlocks), tokens?.input || 0, tokens?.output || 0, msgId);
     console.log(`[Chat] finalizeMessage result: changes=${result.changes}`);
 
@@ -396,7 +377,7 @@ function markMessageInterrupted(msgId: string, partialContent: string): void {
     const db = getDb();
     const content = partialContent || '';
     db.prepare(
-        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'interrupted' WHERE id = ?`
+        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'interrupted', is_partial = 0 WHERE id = ?`
     ).run(serializeContent([{ type: 'text', text: content }]), msgId);
 }
 

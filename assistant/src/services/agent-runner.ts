@@ -9,7 +9,7 @@ import {
 // 确保工具已注册
 registerAllTools();
 
-export type AgentStreamCallback = (type: 'text' | 'tool_call' | 'tool_result' | 'usage' | 'error' | 'done' | 'confirmation_requested' | 'aborted', content: any) => void;
+export type AgentStreamCallback = (type: 'text' | 'tool_call' | 'tool_result' | 'usage' | 'error' | 'done' | 'round_complete' | 'confirmation_requested' | 'aborted', content: any) => void;
 
 interface RunnerOptions {
     workspaceId: string;
@@ -222,6 +222,16 @@ export class AgentRunner {
                 messages.push({
                     role: 'user',
                     content: toolResults,
+                });
+
+                // 广播 round_complete 事件，让 consumer 按轮次保存消息
+                if (callback) callback('round_complete', {
+                    assistant: assistantContent,
+                    toolResults: toolResults.map(r => ({
+                        type: 'tool_result' as const,
+                        tool_use_id: r.tool_use_id,
+                        content: r.content,
+                    })),
                 });
 
                 // 继续下一轮，Claude 拿到所有结果后统一总结

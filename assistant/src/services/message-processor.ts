@@ -614,8 +614,8 @@ async function runAgentTaskForChannel(
     const assistantMsgId = randomUUID();
     const now = Date.now();
     db.prepare(
-        `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', ?)`
+        `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, is_partial, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', 1, ?)`
     ).run(assistantMsgId, sessionId, workspaceId, 'owner', 'assistant', '', now + 1);
 
     // 写入用户消息
@@ -670,13 +670,12 @@ async function runAgentTaskForChannel(
 
         const systemPrompt = await buildSystemPrompt(workspaceId, userContent, notifyTarget);
 
-        // Content blocks collection
-        const assistantContentBlocks: any[] = [];
-        const toolResultBlocks: any[] = [];
-        let currentText = '';
+        // Content blocks collection — per-round via round_complete
         let runtimeError: string | null = null;
         let inputTokens = 0;
         let outputTokens = 0;
+        let currentPlaceholderId = assistantMsgId;
+        let isFirstRound = true;
 
         const onEvent: AgentStreamCallback = (type, payload) => {
             // 广播到 WebSocket 客户端
@@ -684,32 +683,40 @@ async function runAgentTaskForChannel(
 
             if (type === 'text') {
                 streamBuffer += payload;
-                currentText += payload;
 
                 const now = Date.now();
                 if (now - lastSaveTime >= SAVE_INTERVAL_MS) {
-                    updateStreamingContent(assistantMsgId, streamBuffer);
+                    updateStreamingContent(currentPlaceholderId, streamBuffer);
                     lastSaveTime = now;
                 }
             } else if (type === 'tool_call') {
-                if (currentText) {
-                    assistantContentBlocks.push({ type: 'text', text: currentText });
-                    currentText = '';
-                }
-                assistantContentBlocks.push({
-                    type: 'tool_use',
-                    id: payload.tool_use_id,
-                    name: payload.name,
-                    input: payload.input,
-                });
+                // 仅广播，round_complete 携带完整数据
             } else if (type === 'tool_result') {
-                toolResultBlocks.push({
-                    type: 'tool_result',
-                    tool_use_id: payload.tool_use_id,
-                    content: typeof payload.result === 'string'
-                        ? payload.result
-                        : JSON.stringify(payload.result),
-                });
+                // 仅广播
+            } else if (type === 'round_complete') {
+                const { assistant, toolResults } = payload;
+
+                // 保存本轮 assistant 消息（第一轮覆盖占位符，后续轮更新上一轮占位符）
+                finalizeMessage(currentPlaceholderId, assistant, sessionId, workspaceId, 'assistant');
+                isFirstRound = false;
+
+                // 保存 tool_result 用户消息
+                for (const tr of toolResults) {
+                    const toolResultMsgId = randomUUID();
+                    db.prepare(
+                        'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+                    ).run(toolResultMsgId, sessionId, workspaceId, 'owner', 'user', serializeContent([tr]), Date.now());
+                }
+
+                // 为下一轮创建 streaming 占位符（is_partial=1，被 buildMessagesForSession 排除）
+                const newPlaceholderId = randomUUID();
+                const nowTs = Date.now();
+                db.prepare(
+                    `INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, status, streaming_content, is_partial, created_at)
+                     VALUES (?, ?, ?, ?, ?, ?, 'streaming', '', 1, ?)`
+                ).run(newPlaceholderId, sessionId, workspaceId, 'owner', 'assistant', '', nowTs);
+                currentPlaceholderId = newPlaceholderId;
+                streamBuffer = '';
             } else if (type === 'error') {
                 console.error(`[Processor] Error event received:`, payload);
                 runtimeError = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -727,37 +734,27 @@ async function runAgentTaskForChannel(
 
         const duration = Date.now() - startTime;
 
-        // 保存最终文本块
-        if (currentText) {
-            assistantContentBlocks.push({ type: 'text', text: currentText });
-        }
-
-        // 【修复】先保存工具结果（tool_results），再最终化助手消息（tool_uses）
-        // 避免 assistant 有 tool_use 但 tool_result 未写入 DB 导致下次请求报错
-        for (const block of toolResultBlocks) {
-            const toolResultMsgId = randomUUID();
-            db.prepare(
-                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-            ).run(toolResultMsgId, sessionId, workspaceId, 'owner', 'user', serializeContent([block]), Date.now());
-        }
-
-        // 完成助手消息（此时 tool_results 已安全写入 DB）
-        if (assistantContentBlocks.length > 0) {
-            finalizeMessage(assistantMsgId, assistantContentBlocks, sessionId, workspaceId, 'assistant');
+        // 最终完成：更新最后一个占位符为最终文本（无工具调用的纯文本响应）
+        if (runtimeError) {
+            finalizeMessage(
+                currentPlaceholderId,
+                [{ type: 'text', text: `执行失败：${runtimeError}` }],
+                sessionId,
+                workspaceId,
+                'assistant'
+            );
+        } else if (streamBuffer) {
+            finalizeMessage(
+                currentPlaceholderId,
+                [{ type: 'text', text: streamBuffer }],
+                sessionId,
+                workspaceId,
+                'assistant'
+            );
         } else {
-            if (runtimeError) {
-                finalizeMessage(
-                    assistantMsgId,
-                    [{ type: 'text', text: `执行失败：${runtimeError}` }],
-                    sessionId,
-                    workspaceId,
-                    'assistant'
-                );
-            } else {
-                db.prepare(
-                    `UPDATE messages SET status = 'complete', streaming_content = NULL WHERE id = ?`
-                ).run(assistantMsgId);
-            }
+            db.prepare(
+                `UPDATE messages SET status = 'complete', streaming_content = NULL, is_partial = 0 WHERE id = ?`
+            ).run(currentPlaceholderId);
         }
 
         // 更新会话活跃时间
@@ -836,7 +833,7 @@ function finalizeMessage(msgId: string, contentBlocks: any[], sessionId?: string
     const db = getDb();
     const content = serializeContent(contentBlocks);
     db.prepare(
-        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete' WHERE id = ?`
+        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'complete', is_partial = 0 WHERE id = ?`
     ).run(content, msgId);
 
     // 清空该工作区的 token 缓存（消息已完成）
@@ -858,7 +855,7 @@ function markMessageInterrupted(msgId: string, partialContent: string, sessionId
     const content = partialContent || '';
     const serialized = serializeContent([{ type: 'text', text: content }]);
     db.prepare(
-        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'interrupted' WHERE id = ?`
+        `UPDATE messages SET content = ?, streaming_content = NULL, status = 'interrupted', is_partial = 0 WHERE id = ?`
     ).run(serialized, msgId);
 
     // 同步插入到 messages_fts（只索引用户消息）
