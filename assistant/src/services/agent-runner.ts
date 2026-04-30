@@ -322,6 +322,14 @@ export class AgentRunner {
             }
 
             if (cloned.role === 'assistant' && Array.isArray(cloned.content)) {
+                // Strip thinking blocks to avoid signature validation errors
+                const beforeLen = cloned.content.length;
+                cloned.content = cloned.content.filter((block: any) => block?.type !== 'thinking');
+                const stripped = beforeLen - cloned.content.length;
+                if (stripped > 0) {
+                    console.warn(`[AgentRunner] stripped ${stripped} thinking block(s) from history`);
+                }
+
                 pendingToolUseIds = new Set(
                     cloned.content
                         .filter((block: any) => block?.type === 'tool_use' && typeof block.id === 'string')
