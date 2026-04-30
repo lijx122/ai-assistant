@@ -322,12 +322,17 @@ export class AgentRunner {
             }
 
             if (cloned.role === 'assistant' && Array.isArray(cloned.content)) {
-                // Strip thinking blocks to avoid signature validation errors
+                // Drop thinking blocks that have no signature (saved before eb54eb0 when
+                // signature_delta events were silently discarded). Valid thinking blocks
+                // must be passed back as-is per the Anthropic API requirement.
                 const beforeLen = cloned.content.length;
-                cloned.content = cloned.content.filter((block: any) => block?.type !== 'thinking');
+                cloned.content = cloned.content.filter((block: any) => {
+                    if (block?.type !== 'thinking') return true;
+                    return typeof block.signature === 'string' && block.signature.length > 0;
+                });
                 const stripped = beforeLen - cloned.content.length;
                 if (stripped > 0) {
-                    console.warn(`[AgentRunner] stripped ${stripped} thinking block(s) from history`);
+                    console.warn(`[AgentRunner] stripped ${stripped} unsigned thinking block(s) from history`);
                 }
 
                 pendingToolUseIds = new Set(
