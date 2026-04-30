@@ -238,18 +238,22 @@ export class AgentRunner {
             }
 
             if (!terminated) {
-                console.warn(`[AgentRunner] Max rounds (${maxRounds}) reached, requesting final summary without tools`);
-                const finalResult = await this.runOnce(messages, systemPrompt, eventCb, []);
+                console.warn(`[AgentRunner] Max rounds (${maxRounds}) reached, requesting final summary`);
+                // 追加用户消息要求总结，而非传 tools:[] 禁工具（非标准后端不兼容空工具列表会产出 XML）
+                messages.push({
+                    role: 'user',
+                    content: '已达到工具调用上限（20轮）。请不要再调用任何工具，基于当前已有的所有搜索结果直接给出最终回答。',
+                });
+                const finalResult = await this.runOnce(messages, systemPrompt, eventCb);
                 if (!finalResult.error) {
-                    if (finalResult.contentBlocks.length > 0) {
-                        if (eventCb) eventCb('done', finalResult.contentBlocks.map(block => {
-                            if (block.type === 'text') return { type: 'text', text: block.text };
-                            if (block.type === 'thinking') return { type: 'thinking', thinking: block.thinking, signature: block.signature };
-                            return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
-                        }));
-                    } else {
-                        if (eventCb) eventCb('done', []);
-                    }
+                    // 只保留 text/thinking，过滤掉模型可能仍然产出的 tool_use
+                    const summaryBlocks = finalResult.contentBlocks.filter(
+                        block => block.type === 'text' || block.type === 'thinking'
+                    ).map(block => {
+                        if (block.type === 'text') return { type: 'text', text: block.text };
+                        return { type: 'thinking', thinking: block.thinking, signature: block.signature };
+                    });
+                    if (eventCb) eventCb('done', summaryBlocks);
                 } else {
                     if (eventCb) eventCb('error', `Max rounds (${maxRounds}) reached + final summary failed: ${finalResult.error}`);
                 }
