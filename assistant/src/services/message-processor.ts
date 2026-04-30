@@ -732,7 +732,16 @@ async function runAgentTaskForChannel(
             assistantContentBlocks.push({ type: 'text', text: currentText });
         }
 
-        // 完成助手消息
+        // 【修复】先保存工具结果（tool_results），再最终化助手消息（tool_uses）
+        // 避免 assistant 有 tool_use 但 tool_result 未写入 DB 导致下次请求报错
+        for (const block of toolResultBlocks) {
+            const toolResultMsgId = randomUUID();
+            db.prepare(
+                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            ).run(toolResultMsgId, sessionId, workspaceId, 'owner', 'user', serializeContent([block]), Date.now());
+        }
+
+        // 完成助手消息（此时 tool_results 已安全写入 DB）
         if (assistantContentBlocks.length > 0) {
             finalizeMessage(assistantMsgId, assistantContentBlocks, sessionId, workspaceId, 'assistant');
         } else {
@@ -749,14 +758,6 @@ async function runAgentTaskForChannel(
                     `UPDATE messages SET status = 'complete', streaming_content = NULL WHERE id = ?`
                 ).run(assistantMsgId);
             }
-        }
-
-        // 保存工具结果
-        for (const block of toolResultBlocks) {
-            const toolResultMsgId = randomUUID();
-            db.prepare(
-                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-            ).run(toolResultMsgId, sessionId, workspaceId, 'owner', 'user', serializeContent([block]), Date.now());
         }
 
         // 更新会话活跃时间

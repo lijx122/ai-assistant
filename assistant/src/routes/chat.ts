@@ -306,7 +306,15 @@ async function runAgentTask(
             assistantContentBlocks.push({ type: 'text', text: currentText });
         }
 
-        // Finalize the assistant message
+        // 【修复】先保存工具结果，再最终化助手消息 — 避免 tool_use 无对应 tool_result
+        for (const block of toolResultBlocks) {
+            const toolResultMsgId = randomUUID();
+            db.prepare(
+                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
+            ).run(toolResultMsgId, sessionId, workspaceId, userId, 'user', serializeContent([block]), Date.now());
+        }
+
+        // Finalize the assistant message (tool_results already safely stored)
         console.log(`[Chat] Finalizing message ${assistantMsgId}, blocks count: ${assistantContentBlocks.length}`);
         if (assistantContentBlocks.length > 0) {
             finalizeMessage(assistantMsgId, assistantContentBlocks, { input: inputTokens, output: outputTokens }, sessionId);
@@ -323,14 +331,6 @@ async function runAgentTask(
                     `UPDATE messages SET status = 'complete', streaming_content = NULL, input_tokens = ?, output_tokens = ? WHERE id = ?`
                 ).run(inputTokens, outputTokens, assistantMsgId);
             }
-        }
-
-        // Save tool results as separate user messages
-        for (const block of toolResultBlocks) {
-            const toolResultMsgId = randomUUID();
-            db.prepare(
-                'INSERT INTO messages (id, session_id, workspace_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)'
-            ).run(toolResultMsgId, sessionId, workspaceId, userId, 'user', serializeContent([block]), Date.now());
         }
 
         // 清空 token 缓存（消息已完成）
