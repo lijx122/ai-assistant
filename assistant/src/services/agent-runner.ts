@@ -155,7 +155,7 @@ export class AgentRunner {
 
                 // 如果没有工具调用，结束对话；有工具调用则执行工具
                 if (roundResult.toolUses.length === 0) {
-                    if (callback) callback('done', null);
+                    if (callback) callback('done', assistantContent.length > 0 ? assistantContent : null);
                     terminated = true;
                     break;
                 }

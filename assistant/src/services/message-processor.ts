@@ -676,6 +676,7 @@ async function runAgentTaskForChannel(
         let outputTokens = 0;
         let currentPlaceholderId = assistantMsgId;
         let isFirstRound = true;
+        let finalAssistantContent: any[] | null = null;
 
         const onEvent: AgentStreamCallback = (type, payload) => {
             // 广播到 WebSocket 客户端
@@ -717,6 +718,10 @@ async function runAgentTaskForChannel(
                 ).run(newPlaceholderId, sessionId, workspaceId, 'owner', 'assistant', '', nowTs);
                 currentPlaceholderId = newPlaceholderId;
                 streamBuffer = '';
+            } else if (type === 'done') {
+                if (Array.isArray(payload) && payload.length > 0) {
+                    finalAssistantContent = payload;
+                }
             } else if (type === 'error') {
                 console.error(`[Processor] Error event received:`, payload);
                 runtimeError = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -743,6 +748,8 @@ async function runAgentTaskForChannel(
                 workspaceId,
                 'assistant'
             );
+        } else if (finalAssistantContent) {
+            finalizeMessage(currentPlaceholderId, finalAssistantContent, sessionId, workspaceId, 'assistant');
         } else if (streamBuffer) {
             finalizeMessage(
                 currentPlaceholderId,

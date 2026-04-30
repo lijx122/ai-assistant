@@ -232,6 +232,7 @@ async function runAgentTask(
         let runtimeError: string | null = null;
         let inputTokens = 0;
         let outputTokens = 0;
+        let finalAssistantContent: any[] | null = null;
 
         const onEvent: AgentStreamCallback = (type, payload) => {
             // Broadcast to all connected WebSocket clients
@@ -279,6 +280,9 @@ async function runAgentTask(
                 streamBuffer = '';
             } else if (type === 'done') {
                 console.log(`[Chat] Done event received for message ${assistantMsgId}`);
+                if (Array.isArray(payload) && payload.length > 0) {
+                    finalAssistantContent = payload;
+                }
             } else if (type === 'error') {
                 console.error(`[Chat] Error event received:`, payload);
                 runtimeError = typeof payload === 'string' ? payload : JSON.stringify(payload);
@@ -306,6 +310,8 @@ async function runAgentTask(
         if (runtimeError) {
             const errorContent = [{ type: 'text', text: `执行失败：${runtimeError}` }];
             finalizeMessage(currentPlaceholderId, errorContent, { input: inputTokens, output: outputTokens }, sessionId);
+        } else if (finalAssistantContent) {
+            finalizeMessage(currentPlaceholderId, finalAssistantContent, { input: inputTokens, output: outputTokens }, sessionId);
         } else if (streamBuffer) {
             finalizeMessage(currentPlaceholderId, [{ type: 'text', text: streamBuffer }], { input: inputTokens, output: outputTokens }, sessionId);
         } else {
