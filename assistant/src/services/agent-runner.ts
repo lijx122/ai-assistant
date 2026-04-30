@@ -238,10 +238,21 @@ export class AgentRunner {
             }
 
             if (!terminated) {
-                const errMsg = `Max rounds (${maxRounds}) reached, stopped to avoid infinite loop`;
-                console.warn(`[AgentRunner] ${errMsg}`);
-                if (eventCb) eventCb('error', errMsg);
-                if (eventCb) eventCb('done', { maxRoundsReached: true, maxRounds });
+                console.warn(`[AgentRunner] Max rounds (${maxRounds}) reached, requesting final summary without tools`);
+                const finalResult = await this.runOnce(messages, systemPrompt, eventCb, []);
+                if (!finalResult.error) {
+                    if (finalResult.contentBlocks.length > 0) {
+                        if (eventCb) eventCb('done', finalResult.contentBlocks.map(block => {
+                            if (block.type === 'text') return { type: 'text', text: block.text };
+                            if (block.type === 'thinking') return { type: 'thinking', thinking: block.thinking, signature: block.signature };
+                            return { type: 'tool_use', id: block.id, name: block.name, input: block.input };
+                        }));
+                    } else {
+                        if (eventCb) eventCb('done', []);
+                    }
+                } else {
+                    if (eventCb) eventCb('error', `Max rounds (${maxRounds}) reached + final summary failed: ${finalResult.error}`);
+                }
             }
         } catch (err: any) {
             if (eventCb) eventCb('error', err.message || 'Stream error');
@@ -388,7 +399,8 @@ export class AgentRunner {
     private async runOnce(
         messages: Anthropic.MessageParam[],
         systemPrompt?: string,
-        onEvent?: AgentStreamCallback
+        onEvent?: AgentStreamCallback,
+        tools?: Anthropic.Tool[]
     ): Promise<{
         textBuffer: string;
         toolUses: PendingToolUse[];
@@ -443,7 +455,7 @@ export class AgentRunner {
             max_tokens: config.claude.max_tokens,
             system: systemPrompt,
             messages: safeMsgs,
-            tools: getToolDefinitions(),
+            tools: tools ?? getToolDefinitions(),
             stream: true,
         });
 
