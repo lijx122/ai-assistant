@@ -734,16 +734,20 @@ async function loadSessions() {
 }
 
 async function selectSession(s) {
-  // 已是当前会话，跳过（避免冗余 API 调用）
   if (store.currentSession?.id === s.id) return
-
-  store.setSession(s)
-  const data = await api.get(`/api/sessions/${s.id}/messages`)
-  if (data?.messages) messages.value = parseMessages(data.messages)
-  expandedToolBlocks.value = {}
-  await nextTick()
-  scrollToBottom()
-  await loadTodo()
+  try {
+    const data = await api.get(`/api/sessions/${s.id}/messages`)
+    if (data?.messages) {
+      messages.value = parseMessages(data.messages)
+      store.setSession(s)
+      expandedToolBlocks.value = {}
+      await nextTick()
+      scrollToBottom()
+      await loadTodo()
+    }
+  } catch(e) {
+    console.error('[Session] Failed to load session:', e)
+  }
 }
 
 async function newSession() {
@@ -920,7 +924,10 @@ async function handleFileSelect(e) {
 async function processFiles(files) {
   for (const file of files) {
     if (!isTextFile(file.name)) continue
-    if (file.size > 1024 * 1024) continue
+    if (file.size > 1024 * 1024) {
+      console.warn('[File] Skipping large file:', file.name, '(' + (file.size / 1024 / 1024).toFixed(1) + 'MB)')
+      continue
+    }
     try {
       const content = await file.text()
       attachments.value.push({ name: file.name, size: file.size, content })
@@ -1231,7 +1238,7 @@ async function sendMessage() {
     }
   } catch(e) {
     store.isStreaming = false
-    isSending = false
+    messages.value = messages.value.filter(m => !(typeof m.id === 'string' && m.id.startsWith('temp-')))
   } finally {
     isSending = false
   }
@@ -1470,6 +1477,10 @@ function handleWSMessage(msg) {
     case 'new_message': {
       const nm = msg.payload
       if (nm && nm.role === 'assistant') {
+        if (nm.content == null) {
+          console.warn('[WS] new_message with null content, skipping')
+          break
+        }
         let parsedContent = nm.content
         try { parsedContent = JSON.parse(nm.content) } catch {}
         messages.value.push({

@@ -195,7 +195,7 @@ sessionRouter.get('/:id/messages', (c) => {
     const t1 = Date.now();
     const rows = db.prepare(
         `SELECT id, session_id, workspace_id, user_id, role, content, status, is_partial, created_at
-         FROM messages WHERE session_id = ? ORDER BY created_at ASC`
+         FROM messages WHERE session_id = ? AND (is_partial IS NULL OR is_partial = 0) ORDER BY created_at ASC`
     ).all(sessionId) as any[];
     const dbMs = Date.now() - t1;
 
@@ -272,7 +272,7 @@ sessionRouter.get('/:id/export', (c) => {
 
     // 获取所有消息
     const rows = db.prepare(
-        'SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC'
+        'SELECT id, session_id, workspace_id, user_id, role, content, message_id, status, is_partial, created_at FROM messages WHERE session_id = ? AND (is_partial IS NULL OR is_partial = 0) ORDER BY created_at ASC'
     ).all(sessionId) as any[];
 
     if (format === 'json') {
@@ -414,7 +414,7 @@ sessionRouter.post('/:id/branch', async (c) => {
 
         // 2. 复制分支点及之前的消息
         const messagesToCopy = db.prepare(
-            'SELECT * FROM messages WHERE session_id = ? AND created_at <= ? ORDER BY created_at ASC'
+            'SELECT id, session_id, workspace_id, user_id, role, content, message_id, status, is_partial, created_at FROM messages WHERE session_id = ? AND created_at <= ? AND (is_partial IS NULL OR is_partial = 0) ORDER BY created_at ASC'
         ).all(sessionId, branchPoint.created_at) as any[];
 
         const oldToNewMsgIds = new Map<string, string>(); // 旧ID -> 新ID 映射
@@ -487,10 +487,22 @@ sessionRouter.post('/:sessionId/rollback', async (c) => {
         return c.json({ error: 'Message not found in this session' }, 404);
     }
 
-    // 删除目标消息之后的所有消息
-    const deleted = db.prepare(
-        'DELETE FROM messages WHERE session_id = ? AND created_at > ?'
-    ).run(sessionId, targetMsg.created_at);
+    // Transaction: clean up FTS/embeddings + delete messages atomically
+    const deleted = db.transaction(() => {
+        db.prepare(
+            'DELETE FROM messages_fts WHERE message_id IN (SELECT id FROM messages WHERE session_id = ? AND created_at > ?)'
+        ).run(sessionId, targetMsg.created_at);
+        db.prepare(
+            'DELETE FROM message_embeddings WHERE session_id = ? AND message_id IN (SELECT id FROM messages WHERE session_id = ? AND created_at > ?)'
+        ).run(sessionId, sessionId, targetMsg.created_at);
+        const result = db.prepare(
+            'DELETE FROM messages WHERE session_id = ? AND created_at > ?'
+        ).run(sessionId, targetMsg.created_at);
+        return result;
+    })();
+
+    // 失效缓存
+    messageCache.invalidate(sessionId);
 
     // 如果有 git hash，执行 reset --hard
     let gitReset = false;

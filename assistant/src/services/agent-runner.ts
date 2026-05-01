@@ -33,7 +33,7 @@ export class AgentRunner {
     private client: Anthropic;
     private lastActive: number;
     private idleTimer: NodeJS.Timeout | null = null;
-    private isDestroyed: boolean = false;
+    public isDestroyed: boolean = false;
     private aborted: boolean = false;
 
     public workspaceId: string;
@@ -117,15 +117,14 @@ export class AgentRunner {
                 // 打断检查
                 if (this.aborted) {
                     if (eventCb) eventCb('aborted', null);
+                    terminated = true;
                     break;
                 }
 
                 // 调用 Claude 一轮，收集所有 tool_use
                 const roundResult = await this.runOnce(messages, systemPrompt, eventCb);
-                const callback = eventCb;
-
                 if (roundResult.error) {
-                    if (callback) callback('error', roundResult.error);
+                    if (eventCb) eventCb('error', roundResult.error);
                     terminated = true;
                     break;
                 }
@@ -155,7 +154,7 @@ export class AgentRunner {
 
                 // 如果没有工具调用，结束对话；有工具调用则执行工具
                 if (roundResult.toolUses.length === 0) {
-                    if (callback) callback('done', assistantContent.length > 0 ? assistantContent : null);
+                    if (eventCb) eventCb('done', assistantContent.length > 0 ? assistantContent : null);
                     terminated = true;
                     break;
                 }
@@ -175,7 +174,7 @@ export class AgentRunner {
                                 confirmationId: result.confirmationId,
                                 title: result.confirmationTitle,
                             });
-                            if (callback) callback('confirmation_requested', {
+                            if (eventCb) eventCb('confirmation_requested', {
                                 tool_use_id: tool.id,
                                 name: tool.name,
                                 confirmationId: result.confirmationId,
@@ -193,7 +192,7 @@ export class AgentRunner {
                             };
                         }
 
-                        if (callback) callback('tool_result', {
+                        if (eventCb) eventCb('tool_result', {
                             tool_use_id: tool.id,
                             name: tool.name,
                             result,
@@ -213,7 +212,7 @@ export class AgentRunner {
                 if (hasConfirmationPending) {
                     // 有确认请求，暂停执行，等待用户确认
                     console.log('[AgentRunner] Tool(s) require confirmation, pausing execution');
-                    if (callback) callback('done', { confirmationPending: true });
+                    if (eventCb) eventCb('done', { confirmationPending: true });
                     terminated = true;
                     break;
                 }
@@ -225,7 +224,7 @@ export class AgentRunner {
                 });
 
                 // 广播 round_complete 事件，让 consumer 按轮次保存消息
-                if (callback) callback('round_complete', {
+                if (eventCb) eventCb('round_complete', {
                     assistant: assistantContent,
                     toolResults: toolResults.map(r => ({
                         type: 'tool_result' as const,
@@ -242,7 +241,7 @@ export class AgentRunner {
                 // 追加用户消息要求总结，而非传 tools:[] 禁工具（非标准后端不兼容空工具列表会产出 XML）
                 messages.push({
                     role: 'user',
-                    content: '已达到工具调用上限（20轮）。请不要再调用任何工具，基于当前已有的所有搜索结果直接给出最终回答。',
+                    content: `已达到工具调用上限（${maxRounds}轮）。请不要再调用任何工具，基于当前已有的所有搜索结果直接给出最终回答。`,
                 });
                 const finalResult = await this.runOnce(messages, systemPrompt, eventCb);
                 if (!finalResult.error) {
@@ -403,8 +402,7 @@ export class AgentRunner {
     private async runOnce(
         messages: Anthropic.MessageParam[],
         systemPrompt?: string,
-        onEvent?: AgentStreamCallback,
-        tools?: Anthropic.Tool[]
+        onEvent?: AgentStreamCallback
     ): Promise<{
         textBuffer: string;
         toolUses: PendingToolUse[];
@@ -427,7 +425,7 @@ export class AgentRunner {
         }
 
         // 日志：打印完整 context 的实际内容（用于诊断 blocks count: 0 问题）
-        console.log('[AgentRunner] Full context:', JSON.stringify(safeMsgs, null, 2));
+        // console.log('[AgentRunner] Full context:', JSON.stringify(safeMsgs, null, 2));
 
         // 额外检查：确保消息格式合法
         for (let i = 0; i < safeMsgs.length; i++) {
@@ -459,7 +457,7 @@ export class AgentRunner {
             max_tokens: config.claude.max_tokens,
             system: systemPrompt,
             messages: safeMsgs,
-            tools: tools ?? getToolDefinitions(),
+            tools: getToolDefinitions(),
             stream: true,
         });
 

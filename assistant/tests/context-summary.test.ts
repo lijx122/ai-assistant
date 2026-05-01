@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { estimateTokens, compactIfNeeded, formatCompactLog, CompactResult } from '../../src/services/context-summary';
+import { estimateTokens, compactIfNeeded, formatCompactLog, CompactResult, getAllCompactsLight, getLatestCompact, saveCompact } from '../../src/services/context-summary';
 import * as configModule from '../../src/config';
+import { initDb, closeDb } from '../../src/db/index';
+import { existsSync, unlinkSync } from 'fs';
+import { resolve } from 'path';
 
 // Mock config
 const mockConfig = {
@@ -35,6 +38,8 @@ vi.mock('@anthropic-ai/sdk', () => {
         },
     };
 });
+
+const testDbPath = resolve(__dirname, 'test-compact.db');
 
 describe('context-summary', () => {
     beforeEach(() => {
@@ -209,6 +214,148 @@ describe('context-summary', () => {
             const log = formatCompactLog(result);
             expect(log).toContain('4000 → 2000');
             expect(log).toContain('50.0%');
+        });
+    });
+
+    describe('getAllCompactsLight', () => {
+        beforeEach(() => {
+            if (existsSync(testDbPath)) unlinkSync(testDbPath);
+            if (existsSync(testDbPath + '-wal')) unlinkSync(testDbPath + '-wal');
+            if (existsSync(testDbPath + '-shm')) unlinkSync(testDbPath + '-shm');
+            initDb(testDbPath);
+        });
+
+        afterEach(() => {
+            closeDb();
+            if (existsSync(testDbPath)) unlinkSync(testDbPath);
+            if (existsSync(testDbPath + '-wal')) unlinkSync(testDbPath + '-wal');
+            if (existsSync(testDbPath + '-shm')) unlinkSync(testDbPath + '-shm');
+        });
+
+        it('should return empty array when no compacts exist', () => {
+            const result = getAllCompactsLight('non-existent-session');
+            expect(result).toEqual([]);
+        });
+
+        it('should return compact records without compacted_messages field', async () => {
+            await saveCompact(
+                'test-session',
+                'test-workspace',
+                'Test summary',
+                [{ role: 'user', content: 'test' }],
+                1000,
+                500
+            );
+
+            const result = getAllCompactsLight('test-session');
+
+            expect(result).toHaveLength(1);
+            expect(result[0]).not.toHaveProperty('compacted_messages');
+            expect(result[0]).toHaveProperty('id');
+            expect(result[0]).toHaveProperty('session_id', 'test-session');
+            expect(result[0]).toHaveProperty('workspace_id', 'test-workspace');
+            expect(result[0]).toHaveProperty('compacted_at');
+            expect(result[0].compacted_at).toBeGreaterThan(0);
+            expect(result[0]).toHaveProperty('summary', 'Test summary');
+            expect(result[0]).toHaveProperty('original_tokens', 1000);
+            expect(result[0]).toHaveProperty('compacted_tokens', 500);
+        });
+
+        it('should return multiple compacts ordered by compacted_at ASC', async () => {
+            await saveCompact(
+                'test-session',
+                'test-workspace',
+                'First',
+                [{ role: 'user', content: 'first' }],
+                1000,
+                500
+            );
+
+            await new Promise(r => setTimeout(r, 10));
+
+            await saveCompact(
+                'test-session',
+                'test-workspace',
+                'Second',
+                [{ role: 'user', content: 'second' }],
+                2000,
+                1000
+            );
+
+            const result = getAllCompactsLight('test-session');
+
+            expect(result).toHaveLength(2);
+            expect(result[0].summary).toBe('First');
+            expect(result[1].summary).toBe('Second');
+            expect(result[0].compacted_at).toBeLessThan(result[1].compacted_at);
+        });
+    });
+
+    describe('getLatestCompact', () => {
+        beforeEach(() => {
+            if (existsSync(testDbPath)) unlinkSync(testDbPath);
+            if (existsSync(testDbPath + '-wal')) unlinkSync(testDbPath + '-wal');
+            if (existsSync(testDbPath + '-shm')) unlinkSync(testDbPath + '-shm');
+            initDb(testDbPath);
+        });
+
+        afterEach(() => {
+            closeDb();
+            if (existsSync(testDbPath)) unlinkSync(testDbPath);
+            if (existsSync(testDbPath + '-wal')) unlinkSync(testDbPath + '-wal');
+            if (existsSync(testDbPath + '-shm')) unlinkSync(testDbPath + '-shm');
+        });
+
+        it('should return null when no compacts exist', () => {
+            const result = getLatestCompact('non-existent-session');
+            expect(result).toBeNull();
+        });
+
+        it('should return the most recent compact by compacted_at', async () => {
+            await saveCompact(
+                'test-session',
+                'test-workspace',
+                'First summary',
+                [{ role: 'user', content: 'first' }],
+                1000,
+                500
+            );
+
+            // Small delay to ensure different timestamps
+            await new Promise(r => setTimeout(r, 10));
+
+            await saveCompact(
+                'test-session',
+                'test-workspace',
+                'Latest summary',
+                [{ role: 'user', content: 'second' }],
+                2000,
+                1000
+            );
+
+            const result = getLatestCompact('test-session');
+
+            expect(result).not.toBeNull();
+            expect(result!.summary).toBe('Latest summary');
+            expect(result!.compacted_tokens).toBe(1000);
+            expect(result!.session_id).toBe('test-session');
+        });
+
+        it('should return the only compact when exactly one exists', async () => {
+            await saveCompact(
+                'only-session',
+                'only-workspace',
+                'Only summary',
+                [{ role: 'user', content: 'only' }],
+                500,
+                250
+            );
+
+            const result = getLatestCompact('only-session');
+
+            expect(result).not.toBeNull();
+            expect(result!.summary).toBe('Only summary');
+            expect(result!.original_tokens).toBe(500);
         });
     });
 });
